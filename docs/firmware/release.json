@@ -1,0 +1,17 @@
+{
+  "version": "1.2.0",
+  "target": "original ESP32",
+  "flash_size": "4MB",
+  "idf": "5.4.2",
+  "full_install": {
+    "file": "SolarProxxie-full.bin",
+    "bytes": 1212992,
+    "sha256": "2d1245011c3260c56de0e1bff7953b0e2d627176433fbd314fd6aa69b8faff2c",
+    "erases_configuration": true
+  },
+  "ota": {
+    "file": "SolarProxxie.bin",
+    "bytes": 1081920,
+    "sha256": "4243b0c7ed615236d54143ddbf1616465474064bef74ed863b8dfbe731e2ccf3"
+  }
+}
