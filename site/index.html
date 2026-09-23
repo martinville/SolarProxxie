@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="SolarProxxie ESP32 gateway documentation and browser firmware installer.">
+  <meta name="theme-color" content="#1b1c18">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="SolarProxxie - ESP32 gateway and firmware installer">
+  <meta property="og:description" content="Local Inteless telemetry gateway, documentation, and browser firmware installer.">
+  <meta property="og:url" content="https://martinville.github.io/SolarProxxie/">
+  <meta property="og:image" content="https://martinville.github.io/SolarProxxie/og.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <title>SolarProxxie - ESP32 gateway and firmware installer</title>
+  <link rel="icon" href="logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <svg class="icon-sprite" aria-hidden="true">
+    <symbol id="i-dashboard" viewBox="0 0 24 24"><path d="M4 13h6V4H4zm10 7h6V11h-6zM4 20h6v-3H4zm10-13h6V4h-6z"/></symbol>
+    <symbol id="i-gateway" viewBox="0 0 24 24"><path d="M5 18h14M7 15a7 7 0 0 1 10 0M10 12a3 3 0 0 1 4 0M12 18v-3"/></symbol>
+    <symbol id="i-data" viewBox="0 0 24 24"><path d="M5 19V9m7 10V5m7 14v-7M3 19h18"/></symbol>
+    <symbol id="i-diagnostics" viewBox="0 0 24 24"><path d="M4 13h4l2-7 4 13 2-6h4M4 4v16h16"/></symbol>
+    <symbol id="i-firmware" viewBox="0 0 24 24"><path d="M8 3v3m8-3v3M8 18v3m8-3v3M3 8h3m12 0h3M3 16h3m12 0h3M7 7h10v10H7zm4 4h2v2h-2z"/></symbol>
+    <symbol id="i-about" viewBox="0 0 24 24"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zm0-11v6m0-10h.01"/></symbol>
+    <symbol id="i-github" viewBox="0 0 24 24"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3.3-.4 6.8-1.6 6.8-7.4A5.8 5.8 0 0 0 19.3 3 5.4 5.4 0 0 0 19.1 0S17.9-.4 15 1.5a13.4 13.4 0 0 0-7 0C5.1-.4 3.9 0 3.9 0a5.4 5.4 0 0 0-.2 3A5.8 5.8 0 0 0 2.2 7.1c0 5.8 3.5 7 6.8 7.4A4.8 4.8 0 0 0 8 18v4M8 19c-3 .9-3-1.5-4.2-2"/></symbol>
+    <symbol id="i-warning" viewBox="0 0 24 24"><path d="M12 3 2 21h20L12 3zm0 6v5m0 3h.01"/></symbol>
+    <symbol id="i-usb" viewBox="0 0 24 24"><path d="M12 3v13m0-13-3 3m3-3 3 3M8 10H5v4a4 4 0 0 0 4 4h3m4-8h3v4a4 4 0 0 1-4 4h-3m-4-8 2-2m-2 2 2 2m6-2-2-2m2 2-2 2M12 21v-3"/></symbol>
+  </svg>
+
+  <div class="site-container">
+    <header>
+      <img class="header-logo" src="logo.svg" alt="">
+      <div class="brand"><h1>Solar<span>Proxxie</span></h1><small>ESP32 GATEWAY · TELEMETRY · MQTT</small></div>
+      <div class="badge">PROJECT SITE</div>
+    </header>
+
+    <nav id="nav" aria-label="Main navigation">
+      <button data-page="overview" class="active"><svg class="icon fill" aria-hidden="true"><use href="#i-dashboard"></use></svg><span>Overview</span></button>
+      <button data-page="operation"><svg class="icon" aria-hidden="true"><use href="#i-gateway"></use></svg><span>How it works</span></button>
+      <button data-page="install"><svg class="icon" aria-hidden="true"><use href="#i-firmware"></use></svg><span>Install</span></button>
+      <button data-page="security"><svg class="icon" aria-hidden="true"><use href="#i-diagnostics"></use></svg><span>Security</span></button>
+      <button data-page="about"><svg class="icon" aria-hidden="true"><use href="#i-about"></use></svg><span>About & sources</span></button>
+      <a class="nav-link" href="https://github.com/martinville/SolarProxxie" target="_blank" rel="noopener noreferrer"><svg class="icon" aria-hidden="true"><use href="#i-github"></use></svg><span>GitHub</span></a>
+    </nav>
+
+    <main id="content">
+      <section class="page active" data-page-panel="overview">
+        <div class="hero">
+          <div>
+            <span class="eyebrow">Open-source ESP-IDF firmware</span>
+            <h2>Local telemetry from an Inteless Wi-Fi dongle</h2>
+            <p>SolarProxxie runs on an original ESP32. The dongle connects to the ESP32 access point, normal IPv4 traffic is forwarded to the home network, and supported telemetry packets are decoded for the local web interface, MQTT, and Home Assistant.</p>
+            <div class="actions">
+              <button class="page-link" data-open-page="install">Install firmware</button>
+              <a class="button secondary" href="https://github.com/martinville/SolarProxxie" target="_blank" rel="noopener noreferrer">View source</a>
+            </div>
+          </div>
+          <div class="status-panel" aria-label="Project scope">
+            <div><span>Target</span><strong>Original ESP32</strong></div>
+            <div><span>Flash</span><strong>4 MB</strong></div>
+            <div><span>SDK</span><strong>ESP-IDF 5.4.2</strong></div>
+            <div><span>Firmware</span><strong class="site-version">Loading</strong></div>
+          </div>
+        </div>
+
+        <div class="dashboard-metrics">
+          <section class="card"><div class="label"><svg class="icon"><use href="#i-gateway"></use></svg>Network path</div><div class="metric">AP + STA</div><p>DHCP, DNS and IPv4 NAPT between the dongle and home Wi-Fi.</p></section>
+          <section class="card"><div class="label"><svg class="icon"><use href="#i-data"></use></svg>Decoder profiles</div><div class="metric">292 / 302 / 306</div><p>Captured single-phase Inteless/Sunsynk telemetry layouts.</p></section>
+          <section class="card"><div class="label"><svg class="icon"><use href="#i-dashboard"></use></svg>Outputs</div><div class="metric">Web + MQTT</div><p>Local status, configurable data points and Home Assistant discovery.</p></section>
+        </div>
+
+        <section class="card">
+          <h3>What the project does</h3>
+          <div class="feature-grid">
+            <div><h4>Forwards traffic</h4><p>The ESP32 provides the dongle with Wi-Fi, DHCP, DNS and an IPv4 route through the home network.</p></div>
+            <div><h4>Observes telemetry</h4><p>Bounded packet copies are decoded without changing the forwarded application payload.</p></div>
+            <div><h4>Publishes readings</h4><p>Mapped readings can be sent to an MQTT broker and represented as separate Home Assistant devices.</p></div>
+            <div><h4>Handles multiple dongles</h4><p>Up to eight IP-to-name/profile mappings are supported, with separate freshness and publication state.</p></div>
+            <div><h4>Supports local fallback</h4><p>Captured read-only cloud replies can keep supported telemetry flowing during a detected Internet outage.</p></div>
+            <div><h4>Provides diagnostics</h4><p>The interface reports network, parser, MQTT, memory, task and packet-capture status.</p></div>
+          </div>
+        </section>
+
+        <section class="card caution-card">
+          <div class="card-icon"><svg class="icon"><use href="#i-warning"></use></svg></div>
+          <div><h3>Monitoring scope</h3><p>This firmware does not send inverter commands or Modbus writes. Packet formats were derived from captures and reference projects rather than a vendor API. Check readings against the actual inverter before using them for billing, safety decisions, or control automation.</p></div>
+        </section>
+      </section>
+
+      <section class="page" data-page-panel="operation" hidden>
+        <div class="subhead"><h2>How it works</h2><p>The ESP32 sits on the network path used by the dongle and observes supported traffic.</p></div>
+
+        <section class="card flow-card">
+          <div class="flow-node"><span>1</span><strong>Inteless dongle</strong><small>Joins the SolarProxxie AP</small></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-node active"><span>2</span><strong>ESP32 gateway</strong><small>DHCP · DNS · NAPT · parser</small></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-node"><span>3</span><strong>Home network</strong><small>Vendor cloud and MQTT broker</small></div>
+        </section>
+
+        <div class="two-column">
+          <section class="card">
+            <h3>Normal forwarding</h3>
+            <ol class="steps-list">
+              <li><span>1</span><div><strong>The ESP32 joins home Wi-Fi.</strong><p>Its station interface receives a DHCP or configured static address.</p></div></li>
+              <li><span>2</span><div><strong>The dongle joins the ESP32 AP.</strong><p>The ESP32 supplies an address, DNS and a default gateway.</p></div></li>
+              <li><span>3</span><div><strong>IPv4 traffic is forwarded.</strong><p>lwIP NAPT carries the dongle traffic through the station interface.</p></div></li>
+              <li><span>4</span><div><strong>Copies are decoded.</strong><p>Only bounded packet copies enter the stream and telemetry parser.</p></div></li>
+              <li><span>5</span><div><strong>Readings are published.</strong><p>Valid values become visible locally and can be sent to MQTT.</p></div></li>
+            </ol>
+          </section>
+          <section class="card">
+            <h3>Operational controls</h3>
+            <dl class="info-list">
+              <div><dt>Cloud forwarding</dt><dd>Can be enabled or disabled per mapped dongle.</dd></div>
+              <div><dt>Data freshness</dt><dd>Marks a source unavailable after its configured timeout.</dd></div>
+              <div><dt>MQTT schedule</dt><dd>Supports change-driven publishing plus minimum and maximum intervals.</dd></div>
+              <div><dt>PCAP capture</dt><dd>Streams a bounded best-effort capture while Debug mode is active.</dd></div>
+              <div><dt>Offline fallback</dt><dd>Uses an ICMP signal and a strict vendor-host/TCP allowlist.</dd></div>
+              <div><dt>OTA</dt><dd>Writes an authenticated upload to the inactive application partition.</dd></div>
+            </dl>
+          </section>
+        </div>
+
+        <section class="card">
+          <h3>Data handling</h3>
+          <p>Each source IP has its own values, inverter serial, last-valid time, freshness, change detection, and MQTT schedule. Display names, units and field suffixes are shared field settings. Unmapped sources may appear in diagnostics but are not published.</p>
+          <p>Changing a unit in the web interface changes the label only. It does not convert the numeric reading. Unsupported, malformed, fragmented, or out-of-order data can be missed by the bounded observer without intentionally blocking the original forwarded traffic.</p>
+        </section>
+      </section>
+
+      <section class="page" data-page-panel="install" hidden>
+        <div class="subhead"><h2>Install firmware</h2><p>Use a desktop Chromium browser and a USB data cable to write the complete image to an original ESP32.</p></div>
+
+        <div class="install-layout">
+          <section class="card installer-card">
+            <div class="row spread"><div><span class="label">Browser installer</span><h3>Full USB installation</h3></div><svg class="large-icon icon"><use href="#i-usb"></use></svg></div>
+            <p>This installs the bootloader, partition table, initial OTA metadata, and SolarProxxie application. It is intended for a new installation or complete replacement.</p>
+            <div class="warning-box"><strong>This process erases existing ESP32 configuration.</strong><span>Saved Wi-Fi, administrator and MQTT settings on the selected board will be lost.</span></div>
+            <esp-web-install-button manifest="firmware/manifest.json">
+              <button slot="activate" class="install-button">Connect ESP32 and install</button>
+              <p slot="unsupported" class="browser-message">Web Serial is unavailable. Use current desktop Chrome or Edge, or follow the command-line instructions.</p>
+              <p slot="not-allowed" class="browser-message">The installer requires an HTTPS page and permission to access the serial device.</p>
+            </esp-web-install-button>
+            <p class="section-note">The serial-device chooser is opened by the browser. This site cannot select a port or start flashing without your click.</p>
+          </section>
+
+          <section class="card requirements-card">
+            <h3>Before connecting</h3>
+            <ul class="check-list">
+              <li>Original dual-core ESP32 / ESP32-WROOM board with 4 MB flash</li>
+              <li>Desktop Google Chrome or Microsoft Edge</li>
+              <li>USB data cable, not a charge-only cable</li>
+              <li>Any serial monitor or IDE closed</li>
+              <li>Stable USB power during the installation</li>
+            </ul>
+            <p>This build does not target ESP32-C3, C6, S2 or S3 boards.</p>
+          </section>
+        </div>
+
+        <section class="card">
+          <h3>Installation sequence</h3>
+          <ol class="numbered-grid">
+            <li><span>1</span><div><strong>Connect the ESP32 by USB.</strong><p>Wait for the operating system to detect its CP210x, CH340, FTDI, or other serial bridge.</p></div></li>
+            <li><span>2</span><div><strong>Select “Connect ESP32 and install”.</strong><p>Choose the serial device that appeared when the board was connected.</p></div></li>
+            <li><span>3</span><div><strong>Allow the full install to finish.</strong><p>Do not disconnect the cable or close the page while flash writing and verification are in progress.</p></div></li>
+            <li><span>4</span><div><strong>Use manual boot mode if required.</strong><p>If automatic connection fails, hold BOOT, tap EN/reset, start the connection, then release BOOT.</p></div></li>
+            <li><span>5</span><div><strong>Open initial setup.</strong><p>After restart, join <code>SolarProxxie-Setup</code> and browse to <code>http://192.168.4.1</code>.</p></div></li>
+            <li><span>6</span><div><strong>Connect the dongle.</strong><p>Use its normal provisioning method to join the protected SolarProxxie AP created during setup.</p></div></li>
+          </ol>
+        </section>
+
+        <section class="card ota-card">
+          <div><h3>Updating an existing SolarProxxie device</h3><p>Use the authenticated <strong>Firmware</strong> page on the ESP32 and upload only the application image. This path preserves configuration and uses the inactive OTA slot.</p></div>
+          <a class="button secondary" href="firmware/SolarProxxie.bin" download>Download OTA image</a>
+        </section>
+
+        <section class="card">
+          <h3>Command-line alternative</h3>
+          <p>The complete source build can also be flashed from an ESP-IDF 5.4.2 terminal:</p>
+          <pre><code>idf.py set-target esp32
+idf.py build
+idf.py -p COM5 flash monitor</code></pre>
+          <p class="section-note">Replace <code>COM5</code> with the actual serial port. Detailed Windows and Linux instructions are in the repository's <a href="https://github.com/martinville/SolarProxxie/blob/main/docs/INSTALL.md" target="_blank" rel="noopener noreferrer">installation guide</a>.</p>
+        </section>
+      </section>
+
+      <section class="page" data-page-panel="security" hidden>
+        <div class="subhead"><h2>Security and network exposure</h2><p>The firmware is intended for a trusted local network. It is not an Internet-facing management service.</p></div>
+
+        <section class="card danger-card">
+          <div class="card-icon"><svg class="icon"><use href="#i-warning"></use></svg></div>
+          <div><h3>The dongle web interface should be treated as unprotected</h3><p>The tested dongle exposed a plain-HTTP interface without a visible login. It included Wi-Fi/network configuration, reboot and firmware-upload controls, with no visible authorization or CSRF mechanism. Destructive upload tests were not performed, so unknown server-side checks cannot be ruled out.</p></div>
+        </section>
+
+        <section class="card">
+          <h3>How SolarProxxie limits dongle UI exposure</h3>
+          <p>The dongle is normally behind the ESP32 NAPT boundary with no inbound mapping from the home network. An authenticated SolarProxxie administrator can temporarily map <code>ESP32:8080</code> to the selected dongle's port 80.</p>
+          <div class="feature-grid security-grid">
+            <div><h4>Off by default</h4><p>No permanent inbound mapping is created.</p></div>
+            <div><h4>15-minute limit</h4><p>The mapping expires automatically.</p></div>
+            <div><h4>Connected target only</h4><p>The target must be a configured dongle currently on the ESP32 AP.</p></div>
+            <div><h4>Automatic closure</h4><p>Logout, disconnect, MAC change, upstream loss, NAPT shutdown or restart closes it.</p></div>
+          </div>
+          <div class="warning-box"><strong>This controls exposure; it does not add a password to the dongle.</strong><span>While port 8080 is enabled, any device able to reach that ESP32 address may be able to operate the dongle UI, including its firmware-upload function. Do not forward port 8080 through a router.</span></div>
+        </section>
+
+        <div class="two-column">
+          <section class="card">
+            <h3>Implemented controls</h3>
+            <ul class="plain-list">
+              <li>WPA2-PSK for the normal dongle access point</li>
+              <li>Salted PBKDF2-HMAC-SHA256 administrator hashes</li>
+              <li>Random, peer-bound sessions with 30-minute idle expiry</li>
+              <li>HttpOnly and SameSite session cookies</li>
+              <li>Separate CSRF tokens for state-changing requests</li>
+              <li>Increasing login backoff</li>
+              <li>Authenticated SolarProxxie OTA endpoint</li>
+              <li>Content Security Policy and escaped UI content</li>
+              <li>Bounded request, socket, queue and parser resources</li>
+            </ul>
+          </section>
+          <section class="card">
+            <h3>Known limitations</h3>
+            <ul class="plain-list">
+              <li>Management HTTP and MQTT are not encrypted</li>
+              <li>Default builds do not enable Secure Boot or flash encryption</li>
+              <li>Wi-Fi and MQTT credentials are recoverable from unencrypted NVS</li>
+              <li>Application OTA images are not publisher-authenticated without separate signed-image provisioning</li>
+              <li>AP clients are not mutually isolated</li>
+              <li>Telemetry authenticity is not cryptographically verified</li>
+              <li>PCAP files can contain private identifiers</li>
+            </ul>
+          </section>
+        </div>
+      </section>
+
+      <section class="page" data-page-panel="about" hidden>
+        <div class="subhead"><h2>About and sources</h2><p>SolarProxxie combines ESP-IDF networking with packet layouts derived from captures and existing open-source references.</p></div>
+
+        <section class="card">
+          <h3>Project scope</h3>
+          <p>The firmware is a local IPv4 gateway and telemetry monitor. It is not affiliated with Inteless, Sunsynk, Deye, E-Linter, or the inverter manufacturer. Product names remain the property of their owners.</p>
+          <p>Protocol behavior can change with dongle or inverter firmware. The repository keeps field evidence, capture notes, tests, and known limitations alongside the implementation.</p>
+        </section>
+
+        <section class="card">
+          <h3>Primary references and software</h3>
+          <div class="source-list">
+            <a href="https://github.com/bmerry/sunsniff" target="_blank" rel="noopener noreferrer"><strong>Bruce Merry - sunsniff</strong><span>Register names, offsets and packet-layout reference · GPL-3.0</span></a>
+            <a href="https://github.com/kellerza/sunsynk" target="_blank" rel="noopener noreferrer"><strong>Johann Kellerman - kellerza/sunsynk</strong><span>Candidate field names and scaling comparison · Apache-2.0</span></a>
+            <a href="https://github.com/espressif/esp-idf" target="_blank" rel="noopener noreferrer"><strong>Espressif ESP-IDF 5.4.2</strong><span>Wi-Fi, lwIP, FreeRTOS integration, HTTP, OTA and platform SDK</span></a>
+            <a href="https://github.com/espressif/esp-mqtt" target="_blank" rel="noopener noreferrer"><strong>Espressif ESP-MQTT</strong><span>MQTT client used through ESP-IDF</span></a>
+            <a href="https://www.nongnu.org/lwip/" target="_blank" rel="noopener noreferrer"><strong>lwIP</strong><span>IPv4 stack, forwarding, NAPT and port mapping</span></a>
+            <a href="https://www.freertos.org/" target="_blank" rel="noopener noreferrer"><strong>FreeRTOS</strong><span>Task scheduling through ESP-IDF</span></a>
+            <a href="https://github.com/Mbed-TLS/mbedtls" target="_blank" rel="noopener noreferrer"><strong>Mbed TLS</strong><span>PBKDF2 and cryptographic primitives</span></a>
+            <a href="https://github.com/DaveGamble/cJSON" target="_blank" rel="noopener noreferrer"><strong>cJSON</strong><span>Embedded JSON parsing and generation</span></a>
+            <a href="https://github.com/esphome/esp-web-tools" target="_blank" rel="noopener noreferrer"><strong>ESP Web Tools</strong><span>Browser serial installer used on this GitHub Pages site</span></a>
+            <a href="https://www.home-assistant.io/integrations/mqtt/" target="_blank" rel="noopener noreferrer"><strong>Home Assistant MQTT</strong><span>Discovery and availability integration target</span></a>
+          </div>
+        </section>
+
+        <div class="two-column">
+          <section class="card">
+            <h3>Project documentation</h3>
+            <ul class="link-list">
+              <li><a href="https://github.com/martinville/SolarProxxie/blob/main/README.md" target="_blank" rel="noopener noreferrer">README and functional overview</a></li>
+              <li><a href="https://github.com/martinville/SolarProxxie/blob/main/docs/ARCHITECTURE.md" target="_blank" rel="noopener noreferrer">Architecture</a></li>
+              <li><a href="https://github.com/martinville/SolarProxxie/blob/main/docs/PROTOCOL.md" target="_blank" rel="noopener noreferrer">Protocol notes</a></li>
+              <li><a href="https://github.com/martinville/SolarProxxie/blob/main/docs/MQTT.md" target="_blank" rel="noopener noreferrer">MQTT and Home Assistant</a></li>
+              <li><a href="https://github.com/martinville/SolarProxxie/blob/main/docs/SECURITY.md" target="_blank" rel="noopener noreferrer">Security model</a></li>
+              <li><a href="https://github.com/martinville/SolarProxxie/blob/main/docs/DONGLE_WEB_SECURITY.md" target="_blank" rel="noopener noreferrer">Dongle web UI observations</a></li>
+            </ul>
+          </section>
+          <section class="card">
+            <h3>License</h3>
+            <p>SolarProxxie is distributed under GPL-3.0-or-later. Individual bundled dependencies retain their own licenses.</p>
+            <a class="button secondary" href="https://github.com/martinville/SolarProxxie/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">Read the license</a>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <footer>COPYRIGHT © 2026 MARTIN VILJOEN <span>◆</span> GPL-3.0-OR-LATER <span>◆</span> FIRMWARE <strong class="site-version">—</strong></footer>
+  </div>
+</body>
+</html>
