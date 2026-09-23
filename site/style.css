@@ -116,6 +116,10 @@ esp-web-install-button { display: block; margin-top: 18px; }
 .check-list li,.plain-list li { position: relative; padding: 9px 0 9px 25px; border-bottom: 1px solid #ffffff0d; color: var(--muted); }
 .check-list li::before { content: "✓"; position: absolute; left: 2px; color: var(--mint); font-weight: 700; }
 .plain-list li::before { content: "•"; position: absolute; left: 7px; color: var(--accent); }
+.summary-list { max-width: 880px; margin: 8px 0 18px; }
+.summary-list li:last-child { border-bottom: 0; }
+.project-summary > p { max-width: 920px; }
+.simple-process .steps-list { max-width: 960px; }
 .numbered-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 1px; overflow: hidden; border: 1px solid var(--edge); border-radius: 10px; background: var(--edge); }
 .numbered-grid li { display: flex; gap: 13px; padding: 18px; background: #20211d; }
 .ota-card { display: flex; align-items: center; justify-content: space-between; gap: 22px; }

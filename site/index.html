@@ -66,22 +66,17 @@
           </div>
         </div>
 
-        <div class="dashboard-metrics">
-          <section class="card"><div class="label"><svg class="icon"><use href="#i-gateway"></use></svg>Network path</div><div class="metric">AP + STA</div><p>DHCP, DNS and IPv4 NAPT between the dongle and home Wi-Fi.</p></section>
-          <section class="card"><div class="label"><svg class="icon"><use href="#i-data"></use></svg>Decoder profiles</div><div class="metric">292 / 302 / 306</div><p>Captured single-phase Inteless/Sunsynk telemetry layouts.</p></section>
-          <section class="card"><div class="label"><svg class="icon"><use href="#i-dashboard"></use></svg>Outputs</div><div class="metric">Web + MQTT</div><p>Local status, configurable data points and Home Assistant discovery.</p></section>
-        </div>
-
-        <section class="card">
-          <h3>What the project does</h3>
-          <div class="feature-grid">
-            <div><h4>Forwards traffic</h4><p>The ESP32 provides the dongle with Wi-Fi, DHCP, DNS and an IPv4 route through the home network.</p></div>
-            <div><h4>Observes telemetry</h4><p>Bounded packet copies are decoded without changing the forwarded application payload.</p></div>
-            <div><h4>Publishes readings</h4><p>Mapped readings can be sent to an MQTT broker and represented as separate Home Assistant devices.</p></div>
-            <div><h4>Handles multiple dongles</h4><p>Up to eight IP-to-name/profile mappings are supported, with separate freshness and publication state.</p></div>
-            <div><h4>Supports local fallback</h4><p>Captured read-only cloud replies can keep supported telemetry flowing during a detected Internet outage.</p></div>
-            <div><h4>Provides diagnostics</h4><p>The interface reports network, parser, MQTT, memory, task and packet-capture status.</p></div>
-          </div>
+        <section class="card project-summary">
+          <h3>What SolarProxxie does</h3>
+          <p>The ESP32 creates a Wi-Fi network for the inverter dongle. It passes the dongle's normal Internet traffic to your home network while reading supported telemetry from that traffic.</p>
+          <ul class="plain-list summary-list">
+            <li>Shows current inverter readings in a local web interface.</li>
+            <li>Publishes selected readings to MQTT and Home Assistant.</li>
+            <li>Supports multiple configured dongles.</li>
+            <li>Provides connection status, diagnostics and optional packet capture.</li>
+            <li>Can provide limited read-only replies during a detected Internet outage.</li>
+          </ul>
+          <p class="section-note">SolarProxxie monitors supported traffic. It does not control the inverter or write settings to it.</p>
         </section>
 
         <section class="card caution-card">
@@ -91,39 +86,29 @@
       </section>
 
       <section class="page" data-page-panel="operation" hidden>
-        <div class="subhead"><h2>How it works</h2><p>The ESP32 sits on the network path used by the dongle and observes supported traffic.</p></div>
+        <div class="subhead"><h2>How it works</h2><p>The dongle connects through SolarProxxie instead of connecting directly to the home router.</p></div>
 
-        <section class="card flow-card">
-          <div class="flow-node"><span>1</span><strong>Inteless dongle</strong><small>Joins the SolarProxxie AP</small></div>
-          <div class="flow-arrow">→</div>
-          <div class="flow-node active"><span>2</span><strong>ESP32 gateway</strong><small>DHCP · DNS · NAPT · parser</small></div>
-          <div class="flow-arrow">→</div>
-          <div class="flow-node"><span>3</span><strong>Home network</strong><small>Vendor cloud and MQTT broker</small></div>
+        <section class="card simple-process">
+          <h3>Normal operation</h3>
+          <ol class="steps-list">
+            <li><span>1</span><div><strong>SolarProxxie connects to your home Wi-Fi.</strong><p>This gives the ESP32 access to your local network and the Internet.</p></div></li>
+            <li><span>2</span><div><strong>The inverter dongle connects to SolarProxxie.</strong><p>The ESP32 provides the Wi-Fi network used by the dongle.</p></div></li>
+            <li><span>3</span><div><strong>The dongle continues its normal communication.</strong><p>SolarProxxie passes that traffic through to your home network.</p></div></li>
+            <li><span>4</span><div><strong>Supported readings are copied and decoded.</strong><p>The original traffic continues unchanged while the ESP32 extracts telemetry it understands.</p></div></li>
+            <li><span>5</span><div><strong>The readings are made available locally.</strong><p>You can view them in the ESP32 interface or publish them to MQTT and Home Assistant.</p></div></li>
+          </ol>
         </section>
 
-        <div class="two-column">
-          <section class="card">
-            <h3>Normal forwarding</h3>
-            <ol class="steps-list">
-              <li><span>1</span><div><strong>The ESP32 joins home Wi-Fi.</strong><p>Its station interface receives a DHCP or configured static address.</p></div></li>
-              <li><span>2</span><div><strong>The dongle joins the ESP32 AP.</strong><p>The ESP32 supplies an address, DNS and a default gateway.</p></div></li>
-              <li><span>3</span><div><strong>IPv4 traffic is forwarded.</strong><p>lwIP NAPT carries the dongle traffic through the station interface.</p></div></li>
-              <li><span>4</span><div><strong>Copies are decoded.</strong><p>Only bounded packet copies enter the stream and telemetry parser.</p></div></li>
-              <li><span>5</span><div><strong>Readings are published.</strong><p>Valid values become visible locally and can be sent to MQTT.</p></div></li>
-            </ol>
-          </section>
-          <section class="card">
-            <h3>Operational controls</h3>
-            <dl class="info-list">
-              <div><dt>Cloud forwarding</dt><dd>Can be enabled or disabled per mapped dongle.</dd></div>
-              <div><dt>Data freshness</dt><dd>Marks a source unavailable after its configured timeout.</dd></div>
-              <div><dt>MQTT schedule</dt><dd>Supports change-driven publishing plus minimum and maximum intervals.</dd></div>
-              <div><dt>PCAP capture</dt><dd>Streams a bounded best-effort capture while Debug mode is active.</dd></div>
-              <div><dt>Offline fallback</dt><dd>Uses an ICMP signal and a strict vendor-host/TCP allowlist.</dd></div>
-              <div><dt>OTA</dt><dd>Writes an authenticated upload to the inactive application partition.</dd></div>
-            </dl>
-          </section>
-        </div>
+        <section class="card">
+          <h3>What you can manage</h3>
+          <ul class="plain-list summary-list">
+            <li>Choose which dongles and readings are published.</li>
+            <li>Set MQTT connection and publishing options.</li>
+            <li>Check whether the ESP32, dongle and MQTT connection are working.</li>
+            <li>Install firmware updates from GitHub or upload an application image.</li>
+            <li>Temporarily open access to the dongle's own web interface when needed.</li>
+          </ul>
+        </section>
 
         <section class="card">
           <h3>Data handling</h3>
