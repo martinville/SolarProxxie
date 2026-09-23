@@ -5,13 +5,13 @@
   "idf": "5.4.2",
   "full_install": {
     "file": "SolarProxxie-full.bin",
-    "bytes": 1212992,
-    "sha256": "2d1245011c3260c56de0e1bff7953b0e2d627176433fbd314fd6aa69b8faff2c",
+    "bytes": 1213040,
+    "sha256": "7cbadeef177f259d076c89c3092975ea73fb1a3de53d8965ae1f81fbb86e0893",
     "erases_configuration": true
   },
   "ota": {
     "file": "SolarProxxie.bin",
-    "bytes": 1081920,
-    "sha256": "4243b0c7ed615236d54143ddbf1616465474064bef74ed863b8dfbe731e2ccf3"
+    "bytes": 1081968,
+    "sha256": "2cc80a73d140bad4edf751285f314dd87a097216e18ebdbe3bb356e8b696fef0"
   }
 }
