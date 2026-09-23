@@ -1,0 +1,37 @@
+name: Verify SolarProxxie
+on: [push, pull_request]
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    container: espressif/idf:v5.4.2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build original ESP32 and run shared C tests
+        shell: bash
+        run: |
+          . /opt/esp/idf/export.sh
+          idf.py set-target esp32
+          idf.py build
+          idf.py size
+          CC=gcc python tools/test_host.py
+          CC=gcc python tools/test_dongle_gui.py
+          python -m unittest discover -s tests -p test_replay_tool.py
+          python tools/packet_decoder/decode.py tests/captures/synthetic292.pcap --json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: solarproxxie-esp32
+          path: |
+            build/SolarProxxie.bin
+            build/bootloader/bootloader.bin
+            build/partition_table/partition-table.bin
+            build/ota_data_initial.bin
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run test:web

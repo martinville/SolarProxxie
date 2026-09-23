@@ -1,0 +1,1 @@
+{"name":"solarproxxie-dev","private":true,"scripts":{"test:web":"node tests/web.test.cjs","test:site":"node tests/site.test.cjs"},"devDependencies":{"linkedom":"0.18.12"}}

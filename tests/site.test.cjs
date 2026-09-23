@@ -1,0 +1,27 @@
+const {parseHTML}=require('linkedom');
+const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
+const html=fs.readFileSync('site/index.html','utf8');
+const {document}=parseHTML(html);
+const manifest=JSON.parse(fs.readFileSync('site/firmware/manifest.json','utf8'));
+const release=JSON.parse(fs.readFileSync('site/firmware/release.json','utf8'));
+
+assert.equal(document.querySelector('title').textContent,'SolarProxxie - ESP32 gateway and firmware installer');
+assert.equal(document.querySelector('.header-logo').getAttribute('src'),'logo.svg');
+assert.equal(document.querySelectorAll('#nav [data-page]').length,5);
+for(const page of ['overview','operation','install','security','about'])assert(document.querySelector(`[data-page-panel="${page}"]`),page);
+assert.equal(document.querySelector('esp-web-install-button').getAttribute('manifest'),'firmware/manifest.json');
+assert.match(document.querySelector('[data-page-panel="install"]').textContent,/erases existing ESP32 configuration/i);
+assert.match(document.querySelector('[data-page-panel="security"]').textContent,/firmware-upload/i);
+assert.match(document.querySelector('[data-page-panel="security"]').textContent,/does not add a password/i);
+assert(document.querySelector('a[href="https://github.com/bmerry/sunsniff"]'));
+assert(document.querySelector('a[href="https://github.com/kellerza/sunsynk"]'));
+assert(document.querySelector('a[href="https://github.com/esphome/esp-web-tools"]'));
+assert(![...document.querySelectorAll('[src],[href]')].some(node=>/^(src|href)="\//.test(node.outerHTML)),'Project Pages assets must use relative paths');
+assert.equal(manifest.name,'SolarProxxie');
+assert.equal(manifest.version,release.version);
+assert.equal(manifest.builds[0].chipFamily,'ESP32');
+assert.equal(manifest.builds[0].parts[0].offset,0);
+for(const file of ['SolarProxxie-full.bin','SolarProxxie.bin'])assert(fs.statSync(path.join('site/firmware',file)).size>900000,file);
+assert.equal(fs.statSync('site/firmware/SolarProxxie-full.bin').size,release.full_install.bytes);
+assert.equal(fs.statSync('site/firmware/SolarProxxie.bin').size,release.ota.bytes);
+console.log('PASS site: navigation, installer manifest, firmware files, security warnings and source links');

@@ -1,0 +1,11 @@
+build/
+sdkconfig
+sdkconfig.old
+.tools/
+.venv/
+__pycache__/
+*.pyc
+node_modules/
+dist/
+*-check.log
+tests/captures/private/

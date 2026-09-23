@@ -1,0 +1,12 @@
+menu "SolarProxxie"
+config GHOST_LED_GPIO
+    int "Status LED GPIO (-1 disables)"
+    range -1 33
+    default -1
+config GHOST_LED_ACTIVE_LOW
+    bool "LED is active low"
+    default n
+config GHOST_TEST_PACKET_REPLAY
+    bool "TEST_PACKET_REPLAY: synthetic telemetry (development only)"
+    default n
+endmenu
