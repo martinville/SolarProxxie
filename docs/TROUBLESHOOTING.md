@@ -1,5 +1,15 @@
 # Troubleshooting
 
+## Local-only dongle has no data after a cold start
+
+Current firmware starts its DNS interceptor and local TCP/51100 cloud service before
+activating the access point. It also answers the initial dongle clock handshake from
+the firmware build clock until SNTP synchronizes. This prevents a local-only dongle
+from caching an early DNS failure or abandoning its cloud session until manually
+rebooted. Diagnostics reports `clock_synchronized` and
+`fallback_clock_responses`; using the fallback during startup is expected when the
+Internet or SNTP is not yet available.
+
 ## No setup AP
 
 - Confirm this is the original ESP32 and that the application was flashed at the

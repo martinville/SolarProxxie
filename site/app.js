@@ -30,9 +30,4 @@ document.addEventListener('click',event=>{
 });
 addEventListener('popstate',()=>iconPage(location.hash.slice(1)||'overview',false));
 
-fetch('firmware/release.json',{cache:'no-store'})
-  .then(response=>response.ok?response.json():Promise.reject())
-  .then(release=>document.querySelectorAll('.site-version').forEach(node=>node.textContent=`v${release.version}`))
-  .catch(()=>document.querySelectorAll('.site-version').forEach(node=>node.textContent='unavailable'));
-
 iconPage(location.hash.slice(1)||'overview',false);

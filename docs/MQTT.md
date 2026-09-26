@@ -22,8 +22,8 @@ addresses: keep each dongle's address stable and update mappings when it changes
 Example for gateway identifier `ghost_aabbccddeeff`, slots 1 and 2:
 
 ```text
-solarproxxie/INVERTER1/battery_soc                       numeric state
-solarproxxie/INVERTER2/battery_soc                       numeric state
+solarproxxie/INVERTER1/state                             JSON state snapshot
+solarproxxie/INVERTER2/state                             JSON state snapshot
 solarproxxie/ghost_aabbccddeeff/availability             gateway online/offline
 solarproxxie/ghost_aabbccddeeff_1/inverter_availability   slot 1 online/offline
 solarproxxie/ghost_aabbccddeeff_2/inverter_availability   slot 2 online/offline
@@ -37,21 +37,23 @@ Its entity unique ID is `ghost_aabbccddeeff_1_battery_soc` (slot 1 example), ind
 of the alias or IP. Renaming a slot changes its device name and state topics while
 retaining its unique IDs. Moving a dongle to another slot changes its unique IDs.
 
-Field names, units, suffixes, enable flags, packet layout and publishing intervals
+Field names, units, JSON keys, enable flags, packet layout and publishing intervals
 are shared settings. Their **values, last successful dataset, change detection,
 publishing interval tracking and freshness are separate for each source IP**.
-The GUI shows the effective topic for the selected inverter. A field suffix of
-`battery_soc`, `inverter/battery_soc` or legacy `sunsynk/battery_soc` produces the
-same mapped topic: `<base>/<mapping-name>/battery_soc`. Other custom paths remain
-beneath the mapping name. Conflicting effective field suffixes are rejected.
+The GUI shows the shared snapshot topic and effective JSON key for the selected inverter.
+A field suffix of `battery_soc`, `inverter/battery_soc` or legacy
+`sunsynk/battery_soc` produces the JSON key `battery_soc`. Conflicting effective
+keys are rejected. Home Assistant discovery uses a value template for each entity
+to select its key from the shared message.
 
 Discovery includes device information, unit, supported device class and state
 class, and two availability topics in `all` mode. Every enabled field for a
 configured dongle is advertised, including before its first reading and while the
 inverter is offline. Freshness is represented by the inverter availability topic;
-temporarily missing values clear their retained state instead of removing the
-entity. Metadata is suppressed when a custom unit no longer matches the verified
-unit.
+temporarily missing values are published as JSON `null` instead of removing the
+entity. Metadata is suppressed when a custom non-temperature unit no longer matches
+the verified unit. Temperature values and discovery units follow the global
+Metric/Imperial preference, with Celsius retained as the internal decoded value.
 
 Device availability uses retained `online` and an MQTT LWT of retained `offline`.
 Inverter availability becomes offline when no valid dataset arrives within the
@@ -63,34 +65,34 @@ the possibly inaccurate inverter clock. A broker outage does not stop decoding.
 
 Discovery is retained and refreshed on connection, explicit request and HA's
 `online` birth message. An empty retained discovery payload removes a disabled
-entity. On settings reload, the old client's discovery is cleaned up
-when reachable before reconnecting with the new settings. If the **old broker is
-offline** during a broker/base/prefix change, its old retained topics cannot be
-removed; clear those on that broker when it returns. This cannot be guaranteed by
-an offline client. Avoid sharing the same MQTT client ID across gateways.
+entity. Discovery is interruptible background work: state snapshots always take
+priority. A broker/base/prefix change can leave retained topics under the old
+namespace; clear those on the old broker if necessary. Avoid sharing the same MQTT
+client ID across gateways.
 
 ## Efficiency and timing
 
-Default minimum interval: 5 seconds. Maximum/forced refresh interval: 60 seconds.
-On-change publication compares the normalized values at half a raw scale step.
-A significant change publishes a complete available enabled dataset after the
-minimum interval. Manual publish bypasses that interval. Stale values are not
-republished as fresh data. Local broker disconnects use an independent reconnect
-loop; the outbox is capped at 8 KiB with expiration.
+Every accepted dongle dataset wakes the MQTT task and is published immediately,
+including when its numeric values are unchanged. The default 5-second interval is
+used only to retry a failed dataset. The default 60-second maximum interval refreshes
+the most recent fresh snapshot when no new dataset arrives. Manual publish bypasses
+both intervals and reports an explicit error when no fresh mapped data exists. Stale
+values are not republished as fresh data. Local broker disconnects use an independent
+reconnect loop; the outbox is capped at 8 KiB with expiration.
 
-Sensor state publications contain only finite numbers from fields marked valid by
-the decoder. Missing or invalid fields are omitted; they are never published as
-the strings `unknown` or `unavailable`. Home Assistant may still display those
+Each inverter state publication is one JSON object containing every enabled field
+from a single captured dataset. Valid fields contain finite numbers; missing or
+invalid fields contain JSON `null` and are never published as the strings `unknown`
+or `unavailable`. Home Assistant may still display those
 states when it has not yet received a reading or when the inverter availability
 topic reports `offline`. This preserves the distinction between a real reading
 and a disconnected inverter.
 
-Each state publish requests QoS 1. Full publish timing starts before the first
-state and finishes after the last acknowledgement or bounded timeout. Dashboard
-statistics retain only the most recent completed attempt: elapsed milliseconds,
-completion uptime, attempted entities, succeeded and failed. This measures **broker
-PUBACKs**, not Home Assistant database/UI processing. Discovery traffic is excluded
-from dataset timing, but included in the overall sent-message counter.
+Each complete JSON snapshot requests one QoS 1 acknowledgement. The MQTT status
+shows the completion uptime and how many entities were carried by the most recent
+successful or failed snapshot. This measures the **broker PUBACK**, not Home
+Assistant database/UI processing. Discovery traffic is excluded from the dataset
+result, but included in the overall sent-message counter.
 
 **Test entered settings** makes a separate short-lived broker connection without
 saving the form or publishing any inverter command. Check `test_result` in the
@@ -119,8 +121,8 @@ before reverting firmware.
 
 Old single-device discovery entries are removed on connection to the configured
 broker. The new per-slot unique IDs create separate entities, so existing HA
-automations/dashboards may need to select the new entities. Legacy retained state
-topics can remain on the broker but are no longer published. Renaming mappings
+automations/dashboards may need to select the new entities. Legacy retained per-field state
+topics are cleared during a reachable settings reload and are no longer published. Renaming mappings
 cleans old mapped state/discovery topics when the old connection is reachable;
 changes while offline may require manual removal of old retained state topics.
 No live multi-dongle/broker hardware qualification is implied by host tests.

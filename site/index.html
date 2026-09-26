@@ -34,12 +34,10 @@
     <header>
       <img class="header-logo" src="logo.svg" alt="">
       <div class="brand"><h1>Solar<span>Proxxie</span></h1><small>ESP32 GATEWAY · TELEMETRY · MQTT</small></div>
-      <div class="badge">PROJECT SITE</div>
     </header>
 
     <nav id="nav" aria-label="Main navigation">
       <button data-page="overview" class="active"><svg class="icon fill" aria-hidden="true"><use href="#i-dashboard"></use></svg><span>Overview</span></button>
-      <button data-page="operation"><svg class="icon" aria-hidden="true"><use href="#i-gateway"></use></svg><span>How it works</span></button>
       <button data-page="install"><svg class="icon" aria-hidden="true"><use href="#i-firmware"></use></svg><span>Install</span></button>
       <button data-page="security"><svg class="icon" aria-hidden="true"><use href="#i-diagnostics"></use></svg><span>Security</span></button>
       <button data-page="about"><svg class="icon" aria-hidden="true"><use href="#i-about"></use></svg><span>About & sources</span></button>
@@ -50,70 +48,49 @@
       <section class="page active" data-page-panel="overview">
         <div class="hero">
           <div>
-            <span class="eyebrow">Open-source ESP-IDF firmware</span>
-            <h2>Local telemetry from an Inteless Wi-Fi dongle</h2>
-            <p>SolarProxxie runs on an original ESP32. The dongle connects to the ESP32 access point, normal IPv4 traffic is forwarded to the home network, and supported telemetry packets are decoded for the local web interface, MQTT, and Home Assistant.</p>
+            <span class="eyebrow">Open-source ESP32 firmware</span>
+            <h2>See what your inverter is doing, locally.</h2>
+            <p>SolarProxxie sits between an Inteless Wi-Fi dongle and your home network. It shows supported inverter readings locally, with optional MQTT and Home Assistant publishing. If the Internet goes down, its limited offline mode can keep supported dongles reporting locally.</p>
             <div class="actions">
               <button class="page-link" data-open-page="install">Install firmware</button>
-              <a class="button secondary" href="https://github.com/martinville/SolarProxxie" target="_blank" rel="noopener noreferrer">View source</a>
             </div>
-          </div>
-          <div class="status-panel" aria-label="Project scope">
-            <div><span>Target</span><strong>Original ESP32</strong></div>
-            <div><span>Flash</span><strong>4 MB</strong></div>
-            <div><span>SDK</span><strong>ESP-IDF 5.4.2</strong></div>
-            <div><span>Firmware</span><strong class="site-version">Loading</strong></div>
           </div>
         </div>
 
-        <section class="card project-summary">
-          <h3>What SolarProxxie does</h3>
-          <p>The ESP32 creates a Wi-Fi network for the inverter dongle. It passes the dongle's normal Internet traffic to your home network while reading supported telemetry from that traffic.</p>
-          <ul class="plain-list summary-list">
-            <li>Shows current inverter readings in a local web interface.</li>
-            <li>Publishes selected readings to MQTT and Home Assistant.</li>
-            <li>Supports multiple configured dongles.</li>
-            <li>Provides connection status, diagnostics and optional packet capture.</li>
-            <li>Can provide limited read-only replies during a detected Internet outage.</li>
-          </ul>
-          <p class="section-note">SolarProxxie monitors supported traffic. It does not control the inverter or write settings to it.</p>
+        <figure class="network-figure">
+          <img src="network-flow.svg" width="1000" height="330" alt="The inverter dongle connects to the SolarProxxie ESP32, which forwards traffic through the home router to the Internet while keeping supported readings available locally.">
+          <figcaption>The dongle uses the ESP32 as its Wi-Fi gateway. Supported telemetry is read locally while normal traffic continues to the home network.</figcaption>
+        </figure>
+
+        <section class="overview-detail" aria-labelledby="overview-detail-title">
+          <div class="overview-intro">
+            <span class="eyebrow">In everyday use</span>
+            <h3 id="overview-detail-title">A small gateway for the dongle you already have.</h3>
+          </div>
+          <div class="overview-points">
+            <div><strong>Connect</strong><p>The dongle joins the ESP32's Wi-Fi network. The ESP32 forwards its normal traffic through your home Wi-Fi.</p></div>
+            <div><strong>Read</strong><p>Supported readings appear in the local web interface, alongside connection and diagnostic information.</p></div>
+            <div><strong>Share</strong><p>When configured, readings can be published to MQTT and discovered by Home Assistant.</p></div>
+          </div>
         </section>
 
-        <section class="card caution-card">
-          <div class="card-icon"><svg class="icon"><use href="#i-warning"></use></svg></div>
-          <div><h3>Monitoring scope</h3><p>This firmware does not send inverter commands or Modbus writes. Packet formats were derived from captures and reference projects rather than a vendor API. Check readings against the actual inverter before using them for billing, safety decisions, or control automation.</p></div>
-        </section>
-      </section>
-
-      <section class="page" data-page-panel="operation" hidden>
-        <div class="subhead"><h2>How it works</h2><p>The dongle connects through SolarProxxie instead of connecting directly to the home router.</p></div>
-
-        <section class="card simple-process">
-          <h3>Normal operation</h3>
-          <ol class="steps-list">
-            <li><span>1</span><div><strong>SolarProxxie connects to your home Wi-Fi.</strong><p>This gives the ESP32 access to your local network and the Internet.</p></div></li>
-            <li><span>2</span><div><strong>The inverter dongle connects to SolarProxxie.</strong><p>The ESP32 provides the Wi-Fi network used by the dongle.</p></div></li>
-            <li><span>3</span><div><strong>The dongle continues its normal communication.</strong><p>SolarProxxie passes that traffic through to your home network.</p></div></li>
-            <li><span>4</span><div><strong>Supported readings are copied and decoded.</strong><p>The original traffic continues unchanged while the ESP32 extracts telemetry it understands.</p></div></li>
-            <li><span>5</span><div><strong>The readings are made available locally.</strong><p>You can view them in the ESP32 interface or publish them to MQTT and Home Assistant.</p></div></li>
-          </ol>
+        <section class="overview-note">
+          <strong>Before you use the readings</strong>
+          <p>SolarProxxie monitors supported traffic; it does not change inverter settings. The packet formats come from captures and reference projects, so check values against your inverter before using them for billing or automation.</p>
         </section>
 
-        <section class="card">
-          <h3>What you can manage</h3>
-          <ul class="plain-list summary-list">
-            <li>Choose which dongles and readings are published.</li>
-            <li>Set MQTT connection and publishing options.</li>
-            <li>Check whether the ESP32, dongle and MQTT connection are working.</li>
-            <li>Install firmware updates from GitHub or upload an application image.</li>
-            <li>Temporarily open access to the dongle's own web interface when needed.</li>
-          </ul>
-        </section>
-
-        <section class="card">
-          <h3>Data handling</h3>
-          <p>Each source IP has its own values, inverter serial, last-valid time, freshness, change detection, and MQTT schedule. Display names, units and field suffixes are shared field settings. Unmapped sources may appear in diagnostics but are not published.</p>
-          <p>Changing a unit in the web interface changes the label only. It does not convert the numeric reading. Unsupported, malformed, fragmented, or out-of-order data can be missed by the bounded observer without intentionally blocking the original forwarded traffic.</p>
+        <section class="supported-dongles" aria-labelledby="supported-dongles-title">
+          <div>
+            <span class="eyebrow">Compatibility</span>
+            <h3 id="supported-dongles-title">Supported dongles</h3>
+          </div>
+          <div>
+            <ul>
+              <li>Inteless Wi-Fi dongle</li>
+              <li>PV Inteless Wi-Fi dongle</li>
+            </ul>
+            <p>Telemetry decoding supports the documented Inteless/Sunsynk single-phase 292-, 302-, and captured 306-byte packet formats. Compatibility depends on the dongle firmware and inverter; check the packet profile and readings on your device.</p>
+          </div>
         </section>
       </section>
 

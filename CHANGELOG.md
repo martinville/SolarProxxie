@@ -2,6 +2,21 @@
 
 SolarProxxie follows [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+- Make every `packetoffsetNNN.json` a self-contained packet-decoding setup with its
+  length, data-point definitions, scaling, formulas, registers and byte offsets.
+  Eight slots can be added, replaced, downloaded or deleted independently; the
+  shared `datapoints.json` format and endpoints were removed.
+- Make byte offsets entirely file-owned. Fresh installations and factory resets
+  parse the three authoritative setup files embedded as firmware data; no
+  measurement byte positions are hardcoded in C.
+- Add a source-or-destination IP filter and a bounded scrolling packet list to the
+  browser-local PCAP inspector.
+- Document the `Long1cap.pcap` register comparison, additional 306-byte field
+  candidates, known BMS/UPS conflicts, and an explicitly unverified three-phase
+  research profile.
+
 ## 1.2.0 - 2026-09-23
 
 - Add a GitHub Pages project site matching the embedded web interface.

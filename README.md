@@ -10,9 +10,6 @@ The project is intended for local monitoring. It does not send inverter commands
 
 The current version is recorded in [`VERSION`](VERSION). Release changes are listed in [`CHANGELOG.md`](CHANGELOG.md).
 
-The static project site and browser firmware installer are in [`site/`](site/).
-GitHub Pages and release instructions are in [`GITHUB_PAGES.md`](GITHUB_PAGES.md).
-
 ## Status
 
 - Target: original ESP32 / ESP32-WROOM, dual-core Xtensa, 4 MB flash.
@@ -79,7 +76,7 @@ Up to eight dongle slots can be configured. Each slot has:
 - A decoder profile.
 - A separate cloud-forwarding setting.
 
-Telemetry values, freshness, change detection, serial number, and publish timing are tracked per source IP. Field names, units, topic suffixes, and enabled/disabled state are shared field definitions.
+Telemetry values, freshness, change detection, serial number, and publish timing are tracked per source IP. Field names, units, JSON keys, and enabled/disabled state are shared field definitions.
 
 Unmapped dongles can appear in diagnostics but are not published to MQTT. A mapping does not reserve a DHCP address, so dongle addresses should remain stable. If different inverter serial numbers appear from the same source IP, publication for that source is blocked to avoid combining data from different inverters.
 
@@ -87,9 +84,11 @@ Unmapped dongles can appear in diagnostics but are not published to MQTT. A mapp
 
 The parser supports the configured 292-byte, 302-byte, and 306-byte packet profiles. It performs bounded TCP stream handling, length checks, field scaling, signed-value handling, and plausibility checks before accepting a dataset.
 
-Mapped measurements include inverter, grid, PV, battery, load, voltage, current, power, temperature, state-of-charge, frequency, and supported energy counters. The exact fields depend on the selected profile. The 306-byte captured profile includes additional daily/monthly energy counters and a UPS/home load split.
+Data points and their byte offsets are defined only by self-contained JSON files; no measurement byte offsets are hardcoded in the C firmware. A factory-fresh installation loads the embedded `packetoffset001.json`, `packetoffset002.json`, and `packetoffset003.json`. Under **Data Points → Packet-offset setup files**, each setup can be downloaded, replaced, or deleted, and additional numbered setups can be added up to slot 008. Each file contains its packet length, field definitions, scaling, formulas, registers, and byte offsets. Uploaded files are persisted in NVS and take effect immediately.
 
-Changing a unit label in the UI changes only the label; it does not convert the numeric value. Register definitions and supporting notes are in [`main/modbus/register_map.c`](main/modbus/register_map.c) and [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
+The authoritative shipped files are [`mappings/packetoffset001.json`](mappings/packetoffset001.json), [`packetoffset002.json`](mappings/packetoffset002.json), and [`packetoffset003.json`](mappings/packetoffset003.json). These exact files are embedded in the firmware image as data and parsed during default initialization. The 306-byte setup includes the evidence-backed daily/yearly counters, inverter frequency, PV4 and warning/fault words, plus the UPS/home-load split. Further candidates and limitations are recorded in [`docs/LONG1CAP_REGISTER_ANALYSIS.md`](docs/LONG1CAP_REGISTER_ANALYSIS.md) and [`mappings/sunsynk-evidence-map.json`](mappings/sunsynk-evidence-map.json).
+
+Settings provides a Metric/Imperial preference. Temperature values remain decoded internally in Celsius, then are converted consistently for Data Points, MQTT state payloads, and Home Assistant discovery (`°C` or `°F`). Custom unit labels for other fields do not convert their numeric values. Register definitions and supporting notes are in [`main/modbus/register_map.c`](main/modbus/register_map.c) and [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
 
 ### MQTT and Home Assistant
 
@@ -98,8 +97,11 @@ MQTT is disabled until configured. The current transport is plain MQTT over TCP,
 For a mapping named `INVERTER1`, a typical state topic is:
 
 ```text
-solarproxxie/INVERTER1/battery_soc
+solarproxxie/INVERTER1/state
 ```
+
+The state payload is one JSON object containing the complete enabled dataset, so Home Assistant
+receives every value from the same inverter snapshot together.
 
 The firmware supports:
 
@@ -207,14 +209,6 @@ The default normal AP subnet is `192.168.50.1/24`, with DHCP addresses from `.10
 
 ## Firmware update and recovery
 
-The Firmware page can check the latest published release at
-`martinville/SolarProxxie`. Cloud updates use certificate-verified HTTPS and accept
-only a release asset named `SolarProxxie.bin` from that repository's release path.
-The downloaded image's embedded project name and version must match the selected
-release before it is activated. An administrator must explicitly confirm the update.
-This transport verification is not a substitute for Secure Boot or signed-image
-validation, which are not enabled by the development defaults.
-
 The **Firmware** page accepts only the application image:
 
 ```text
@@ -251,7 +245,7 @@ Additional packet-decoder and fixture commands are documented in [`docs/TESTING.
 
 ## Known scope and limitations
 
-- Only the listed Inteless/Sunsynk single-phase profiles are implemented. Three-phase maps and other packet sizes must not be assumed compatible.
+- Only the listed Inteless/Sunsynk single-phase profiles are implemented. The research map documents a PDF-derived string-inverter three-phase candidate, but native three-phase hybrid packet offsets and other packet sizes must not be assumed compatible.
 - Packet and field mappings come from reverse engineering and reference comparison, not a vendor contract.
 - TCP reassembly is intentionally bounded. Out-of-order gaps, fragmentation, oversized frames, or queue pressure can cause missed observations.
 - AP and STA share one 2.4 GHz radio and channel.

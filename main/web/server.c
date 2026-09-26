@@ -1,11 +1,11 @@
 #include "app.h"
 #include "esp_app_desc.h"
+#include "esp_http_client.h"
 #include "esp_log.h"
 #include "lwip/sockets.h"
 #include "mbedtls/platform_util.h"
 #include "mqtt/discovery.h"
 #include "network/clients.h"
-#include "esp_http_client.h"
 #include "security/security.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -121,6 +121,56 @@ static esp_err_t json(httpd_req_t *r, cJSON *j) {
     free(s);
     return e;
 }
+static esp_err_t error(httpd_req_t *r, const char *status, const char *message);
+static esp_err_t packet_offset_download(httpd_req_t *r, const ghost_config_t *c, unsigned slot) {
+    if (slot >= GHOST_PACKET_PROFILE_COUNT || !c->packet_profile_active[slot])
+        return error(r, "404 Not Found", "That packet-offset setup does not exist");
+    char disposition[72];
+    snprintf(disposition, sizeof(disposition), "attachment; filename=\"packetoffset%03u.json\"",
+             slot + 1);
+    httpd_resp_set_type(r, "application/json");
+    httpd_resp_set_hdr(r, "Cache-Control", "no-store");
+    httpd_resp_set_hdr(r, "Content-Disposition", disposition);
+    cJSON *metadata = cJSON_CreateObject();
+    cJSON_AddNumberToObject(metadata, "version", 1);
+    cJSON_AddNumberToObject(metadata, "packet_offset", slot + 1);
+    cJSON_AddStringToObject(metadata, "name", c->packet_profile_names[slot]);
+    cJSON_AddNumberToObject(metadata, "layout", c->packet_profile_layouts[slot]);
+    char *header = metadata ? cJSON_PrintUnformatted(metadata) : NULL;
+    cJSON_Delete(metadata);
+    if (!header)
+        return ESP_ERR_NO_MEM;
+    esp_err_t header_result = httpd_resp_send_chunk(r, header, strlen(header) - 1);
+    free(header);
+    if (header_result != ESP_OK || httpd_resp_send_chunk(r, ",\"data_points\":[", 16) != ESP_OK)
+        return ESP_FAIL;
+    for (size_t i = 0; i < c->field_count; i++) {
+        cJSON *item = ghost_data_point_definition_json(c, i);
+        const ghost_packet_mapping_t *mapping = &c->packet_mappings[slot][i];
+        if (item && mapping->state == GHOST_PACKET_MAPPING_OFFSET && c->fields[i].words == 1)
+            cJSON_AddNumberToObject(item, "offset", mapping->position[0]);
+        else if (item && mapping->state == GHOST_PACKET_MAPPING_OFFSET && c->fields[i].words == 2) {
+            cJSON *offsets = cJSON_AddArrayToObject(item, "offsets");
+            cJSON_AddItemToArray(offsets, cJSON_CreateNumber(mapping->position[0]));
+            cJSON_AddItemToArray(offsets, cJSON_CreateNumber(mapping->position[1]));
+        }
+        char *text = item ? cJSON_PrintUnformatted(item) : NULL;
+        cJSON_Delete(item);
+        if (!text)
+            return ESP_ERR_NO_MEM;
+        esp_err_t result = ESP_OK;
+        if (i && httpd_resp_send_chunk(r, ",", 1) != ESP_OK)
+            result = ESP_FAIL;
+        if (result == ESP_OK && httpd_resp_send_chunk(r, text, strlen(text)) != ESP_OK)
+            result = ESP_FAIL;
+        free(text);
+        if (result != ESP_OK)
+            return result;
+    }
+    if (httpd_resp_send_chunk(r, "]}", 2) != ESP_OK)
+        return ESP_FAIL;
+    return httpd_resp_send_chunk(r, NULL, 0);
+}
 static esp_err_t error(httpd_req_t *r, const char *status, const char *message) {
     httpd_resp_set_status(r, status);
     cJSON *j = cJSON_CreateObject();
@@ -189,11 +239,11 @@ static void login_worker(void *context) {
     bool matches = ghost_password_verify(job->password, job->salt, job->hash);
     if (!matches) {
         matches = ghost_password_verify_iterations(job->password, job->salt, job->hash,
-                                                    GHOST_LEGACY_KDF_ITERATIONS);
+                                                   GHOST_LEGACY_KDF_ITERATIONS);
         if (matches && job->username_matches) {
             esp_fill_random(job->upgraded_salt, sizeof(job->upgraded_salt));
-            job->upgrade_hash = ghost_password_hash(job->password, job->upgraded_salt,
-                                                    job->upgraded_hash);
+            job->upgrade_hash =
+                ghost_password_hash(job->password, job->upgraded_salt, job->upgraded_hash);
         }
     }
     job->verification_ms = (uint32_t)(ghost_millis() - start);
@@ -324,7 +374,7 @@ static esp_err_t points(httpd_req_t *r, const ghost_config_t *c, unsigned slot) 
     ghost_source_t source;
     ghost_telemetry_get(c->dongles[slot].ip, &source);
     ghost_values_t v = source.values;
-    uint64_t updated = source.updated;
+    uint64_t now = ghost_millis();
     if (source.conflict)
         v.valid = 0;
     httpd_resp_set_type(r, "application/json");
@@ -337,7 +387,7 @@ static esp_err_t points(httpd_req_t *r, const ghost_config_t *c, unsigned slot) 
         const ghost_entity_t *e = &c->entities[i];
         cJSON_AddStringToObject(j, "id", f->id);
         cJSON_AddStringToObject(j, "name", e->name);
-        cJSON_AddStringToObject(j, "suggested_name", f->name);
+        cJSON_AddStringToObject(j, "suggested_name", e->name);
         cJSON_AddStringToObject(j, "ha_name", e->ha_name);
         cJSON_AddStringToObject(j, "suffix", e->suffix);
         cJSON_AddNumberToObject(j, "slot", slot + 1);
@@ -348,10 +398,11 @@ static esp_err_t points(httpd_req_t *r, const ghost_config_t *c, unsigned slot) 
         char topic[192];
         cJSON_AddStringToObject(j, "mqtt_topic",
                                 ghost_mapped_topic(topic, sizeof(topic), c, slot, i) ? topic : "");
-        cJSON_AddStringToObject(j, "unit", e->unit);
+        cJSON_AddStringToObject(j, "mqtt_key", ghost_field_suffix(e->suffix));
+        cJSON_AddStringToObject(j, "unit", ghost_display_unit(c, i));
         cJSON_AddBoolToObject(j, "enabled", e->enabled);
         if (v.valid & (UINT64_C(1) << i))
-            cJSON_AddNumberToObject(j, "value", v.value[i]);
+            cJSON_AddNumberToObject(j, "value", ghost_display_value(c, i, v.value[i]));
         else
             cJSON_AddNullToObject(j, "value");
         cJSON_AddNumberToObject(j, "register", f->reg[0]);
@@ -359,14 +410,37 @@ static esp_err_t points(httpd_req_t *r, const ghost_config_t *c, unsigned slot) 
         cJSON_AddNumberToObject(j, "words", f->words);
         cJSON_AddNumberToObject(j, "scale", f->scale);
         cJSON_AddNumberToObject(j, "offset", f->offset);
-        cJSON_AddStringToObject(j, "evidence", f->evidence);
+        cJSON_AddStringToObject(j, "evidence", "uploaded mapping file");
+        unsigned profile =
+            c->dongle_profiles[slot] >= 1 && c->dongle_profiles[slot] <= GHOST_PACKET_PROFILE_COUNT
+                ? c->dongle_profiles[slot] - 1
+                : 0;
+        const ghost_packet_mapping_t *mapping = &c->packet_mappings[profile][i];
+        if (mapping->state != GHOST_PACKET_MAPPING_OFFSET || !f->words) {
+            cJSON_AddNullToObject(j, "packet_offset");
+            cJSON_AddNullToObject(j, "packet_offset2");
+        } else {
+            cJSON_AddNumberToObject(j, "packet_offset", mapping->position[0]);
+            if (f->words == 2)
+                cJSON_AddNumberToObject(j, "packet_offset2", mapping->position[1]);
+            else
+                cJSON_AddNullToObject(j, "packet_offset2");
+        }
+        cJSON_AddStringToObject(j, "packet_mapping",
+                                mapping->state == GHOST_PACKET_MAPPING_OFFSET     ? "file"
+                                : mapping->state == GHOST_PACKET_MAPPING_DISABLED ? "disabled"
+                                                                                  : "unmapped");
+        uint64_t updated = source.field_updated[i];
         cJSON_AddNumberToObject(j, "updated_ms", updated);
+        if (updated && now >= updated)
+            cJSON_AddNumberToObject(j, "updated_age_seconds", (now - updated) / 1000);
+        else
+            cJSON_AddNullToObject(j, "updated_age_seconds");
         cJSON_AddStringToObject(j, "status",
                                 source.conflict                   ? "serial conflict"
                                 : !(v.valid & (UINT64_C(1) << i)) ? "unobserved"
-                                : ghost_millis() - updated >= (uint64_t)c->stale_seconds * 1000
-                                    ? "stale"
-                                    : "fresh");
+                                : now - updated >= (uint64_t)c->stale_seconds * 1000 ? "stale"
+                                                                                     : "fresh");
         char *text = cJSON_PrintUnformatted(j);
         cJSON_Delete(j);
         if (!text)
@@ -420,10 +494,34 @@ static int point_slot(const char *uri, const char *prefix) {
     if (!strcmp(uri, prefix))
         return 0;
     if (!strncmp(uri, prefix, n) && uri[n] == '/' && uri[n + 1] >= '1' &&
-        uri[n + 1] < '1' + GHOST_DONGLES_MAX &&
-        !uri[n + 2])
+        uri[n + 1] < '1' + GHOST_DONGLES_MAX && !uri[n + 2])
         return uri[n + 1] - '1';
     return -1;
+}
+static int packet_offset_slot(const char *uri) {
+    static const char prefix[] = "/api/packet-offsets/";
+    size_t n = sizeof(prefix) - 1;
+    if (strncmp(uri, prefix, n) || strlen(uri + n) != 3 || uri[n] != '0' || uri[n + 1] != '0' ||
+        uri[n + 2] < '1' || uri[n + 2] >= '1' + GHOST_PACKET_PROFILE_COUNT)
+        return -1;
+    return uri[n + 2] - '1';
+}
+static int packet_upload_slot(const char *uri, const char **action) {
+    static const char prefix[] = "/api/packet-offsets/";
+    size_t n = sizeof(prefix) - 1;
+    if (strncmp(uri, prefix, n) || uri[n] != '0' || uri[n + 1] != '0' ||
+        uri[n + 2] < '1' || uri[n + 2] >= '1' + GHOST_PACKET_PROFILE_COUNT || uri[n + 3] != '/')
+        return -1;
+    *action = uri + n + 4;
+    return uri[n + 2] - '1';
+}
+static int shipped_packet_offset_slot(const char *uri) {
+    static const char prefix[] = "/api/shipped-packet-offsets/";
+    size_t n = sizeof(prefix) - 1;
+    if (strncmp(uri, prefix, n) || strlen(uri + n) != 3 || uri[n] != '0' || uri[n + 1] != '0' ||
+        uri[n + 2] < '1' || uri[n + 2] > '3')
+        return -1;
+    return uri[n + 2] - '1';
 }
 static esp_err_t get(httpd_req_t *r) {
     if (!setup_interface(r))
@@ -462,13 +560,24 @@ static esp_err_t get(httpd_req_t *r) {
         return json(r, j);
     }
     if (!strcmp(r->uri, "/api/update"))
-        return ghost_setup ? error(r, "403 Forbidden", "Cloud update requires normal administrator mode")
-                           : json(r, ghost_cloud_update_status());
+        return ghost_setup
+                   ? error(r, "403 Forbidden", "Cloud update requires normal administrator mode")
+                   : json(r, ghost_cloud_update_status());
     if (!strcmp(r->uri, "/api/scan")) {
         if (!ghost_setup)
             return error(r, "403 Forbidden", "Physical Setup Mode required");
         cJSON *a = ghost_network_scan();
         return a ? json(r, a) : error(r, "503 Service Unavailable", "Scan busy; retry shortly");
+    }
+    int shipped_slot = shipped_packet_offset_slot(r->uri);
+    if (shipped_slot >= 0) {
+        size_t length = 0;
+        const uint8_t *contents = ghost_packet_mapping_shipped((unsigned)shipped_slot, &length);
+        if (!contents)
+            return error(r, "404 Not Found", "Shipped packet-offset setup not found");
+        httpd_resp_set_type(r, "application/json");
+        httpd_resp_set_hdr(r, "Cache-Control", "no-store, max-age=0");
+        return httpd_resp_send(r, (const char *)contents, length);
     }
     ghost_config_t *c = malloc(sizeof(*c));
     if (!c)
@@ -478,6 +587,13 @@ static esp_err_t get(httpd_req_t *r) {
     bool debug = c->debug;
     if (!strcmp(r->uri, "/api/config") || !strcmp(r->uri, "/api/export")) {
         esp_err_t result = config_response(r, c, !strcmp(r->uri, "/api/config"));
+        memset(c, 0, sizeof(*c));
+        free(c);
+        return result;
+    }
+    int offset_slot = packet_offset_slot(r->uri);
+    if (offset_slot >= 0) {
+        esp_err_t result = packet_offset_download(r, c, (unsigned)offset_slot);
         memset(c, 0, sizeof(*c));
         free(c);
         return result;
@@ -539,9 +655,60 @@ static esp_err_t post(httpd_req_t *r) {
             return error(r, "403 Forbidden", "OTA requires normal administrator mode");
         return ghost_ota_upload(r);
     }
+    int early_packet_slot = packet_offset_slot(r->uri);
+    bool early_config = early_packet_slot >= 0 || !strcmp(r->uri, "/api/mapping-defaults");
+    ghost_config_t *c = NULL;
+    if (early_config) {
+        c = malloc(sizeof(*c));
+        if (!c)
+            return error(r, "503 Service Unavailable",
+                         "Memory unavailable before reading packet-offset request");
+        ghost_config_get(c);
+    }
     cJSON *j = body(r);
-    if (!j)
+    if (!j) {
+        if (c) {
+            memset(c, 0, sizeof(*c));
+            free(c);
+        }
         return error(r, "400 Bad Request", "Invalid JSON or request too large");
+    }
+    const char *upload_action = NULL;
+    int upload_slot = packet_upload_slot(r->uri, &upload_action);
+    if (upload_slot >= 0) {
+        char upload_error[160] = "Invalid packet-offset upload request";
+        esp_err_t result;
+        if (!strcmp(upload_action, "begin"))
+            result = ghost_packet_upload_begin((unsigned)upload_slot, j, upload_error,
+                                               sizeof(upload_error))
+                         ? ok(r)
+                         : error(r, "400 Bad Request", upload_error);
+        else if (!strcmp(upload_action, "chunk"))
+            result = ghost_packet_upload_chunk(j, upload_error, sizeof(upload_error))
+                         ? ok(r)
+                         : error(r, "400 Bad Request", upload_error);
+        else if (!strcmp(upload_action, "commit")) {
+            ghost_config_t *uploaded =
+                ghost_packet_upload_finish(upload_error, sizeof(upload_error));
+            if (!uploaded)
+                result = error(r, "400 Bad Request", upload_error);
+            else if (ghost_config_save(uploaded) != ESP_OK)
+                result = error(r, "500 Internal Server Error", "Packet offsets were not saved");
+            else {
+                ghost_router_config(uploaded);
+                result = ok(r);
+            }
+            if (uploaded) {
+                memset(uploaded, 0, sizeof(*uploaded));
+                free(uploaded);
+            }
+        } else {
+            ghost_packet_upload_cancel();
+            result = error(r, "404 Not Found", "Unknown packet-offset upload action");
+        }
+        cJSON_Delete(j);
+        return result;
+    }
     if (!strcmp(r->uri, "/api/update")) {
         if (ghost_setup) {
             cJSON_Delete(j);
@@ -555,13 +722,13 @@ static esp_err_t post(httpd_req_t *r) {
             result = ghost_cloud_update_check(update_error, sizeof(update_error));
         else if (cJSON_IsString(action) && !strcmp(action->valuestring, "install") &&
                  cJSON_IsString(version))
-            result = ghost_cloud_update_start(version->valuestring, update_error,
-                                              sizeof(update_error));
+            result =
+                ghost_cloud_update_start(version->valuestring, update_error, sizeof(update_error));
         cJSON_Delete(j);
-        return result == ESP_OK ? json(r, ghost_cloud_update_status())
-                                : error(r, result == ESP_ERR_INVALID_STATE ? "409 Conflict"
-                                                                         : "502 Bad Gateway",
-                                        update_error);
+        return result == ESP_OK
+                   ? json(r, ghost_cloud_update_status())
+                   : error(r, result == ESP_ERR_INVALID_STATE ? "409 Conflict" : "502 Bad Gateway",
+                           update_error);
     }
     if (!strcmp(r->uri, "/api/dongle-gui")) {
         const cJSON *enabled = cJSON_GetObjectItemCaseSensitive(j, "enabled");
@@ -575,27 +742,82 @@ static esp_err_t post(httpd_req_t *r) {
                             "Select a configured, connected dongle with a known IP while the "
                             "gateway is online");
     }
-    ghost_config_t *c = malloc(sizeof(*c));
     if (!c) {
-        cJSON_Delete(j);
-        return error(r, "503 Service Unavailable", "Memory unavailable");
+        c = malloc(sizeof(*c));
+        if (!c) {
+            cJSON_Delete(j);
+            return error(r, "503 Service Unavailable",
+                         "Memory unavailable while opening configuration");
+        }
+        ghost_config_get(c);
     }
-    ghost_config_get(c);
     esp_err_t rc = ESP_OK;
     char err[160] = "Invalid settings";
-    if (!strcmp(r->uri, "/api/dongle-info")) {
+    if (!strcmp(r->uri, "/api/mapping-defaults")) {
+        if (ghost_setup)
+            rc = error(r, "403 Forbidden", "Mapping defaults require normal administrator mode");
+        else if (!ghost_packet_mapping_defaults(c, err, sizeof(err)))
+            rc = error(r, "500 Internal Server Error", err);
+        else if (ghost_config_save(c) != ESP_OK)
+            rc = error(r, "500 Internal Server Error", "Shipped mapping files were not saved");
+        else {
+            ghost_router_config(c);
+            rc = ok(r);
+        }
+    } else if (packet_offset_slot(r->uri) >= 0) {
+        unsigned slot = (unsigned)packet_offset_slot(r->uri);
+        const cJSON *remove = cJSON_GetObjectItemCaseSensitive(j, "delete");
+        if (ghost_setup)
+            rc = error(r, "403 Forbidden", "Packet offsets require normal administrator mode");
+        else if (cJSON_IsTrue(remove)) {
+            bool used = false;
+            for (unsigned d = 0; d < GHOST_DONGLES_MAX; d++)
+                if (c->dongles[d].ip[0] && c->dongle_profiles[d] == slot + 1) {
+                    used = true;
+                    break;
+                }
+            if (used)
+                rc = error(
+                    r, "409 Conflict",
+                    "Assign every dongle to another packet-offset setup before deleting this one");
+            else if (!c->packet_profile_active[slot])
+                rc = error(r, "404 Not Found", "That packet-offset setup does not exist");
+            else {
+                memset(c->packet_mappings[slot], 0, sizeof(c->packet_mappings[slot]));
+                c->packet_profile_active[slot] = false;
+                c->packet_profile_layouts[slot] = 0;
+                memset(c->packet_profile_names[slot], 0, sizeof(c->packet_profile_names[slot]));
+                if (ghost_config_save(c) != ESP_OK)
+                    rc = error(r, "500 Internal Server Error",
+                               "Packet-offset setup was not deleted");
+                else {
+                    ghost_router_config(c);
+                    rc = ok(r);
+                }
+            }
+        } else if (!ghost_packet_offsets_from_json(c, slot, j, err, sizeof(err)))
+            rc = error(r, "400 Bad Request", err);
+        else if (ghost_config_save(c) != ESP_OK)
+            rc = error(r, "500 Internal Server Error", "Packet offsets were not saved");
+        else {
+            ghost_router_config(c);
+            rc = ok(r);
+        }
+    } else if (!strcmp(r->uri, "/api/dongle-info")) {
         const cJSON *ip = cJSON_GetObjectItemCaseSensitive(j, "ip");
         cJSON *info = cJSON_IsString(ip) ? connected_dongle_info(c, ip->valuestring) : NULL;
         rc = info ? json(r, info)
-                  : error(r, "409 Conflict", "No cloud identity packet captured for this connected dongle yet");
+                  : error(r, "409 Conflict",
+                          "No cloud identity packet captured for this connected dongle yet");
     } else if (!strcmp(r->uri, "/api/dongle-reboot")) {
         const cJSON *ip = cJSON_GetObjectItemCaseSensitive(j, "ip");
         rc = cJSON_IsString(ip) && reboot_connected_dongle(c, ip->valuestring)
                  ? ok(r)
                  : error(r, "409 Conflict",
-                         "Reboot not confirmed. Check that this mapped dongle is connected and reachable.");
+                         "Reboot not confirmed. Check that this mapped dongle is connected and "
+                         "reachable.");
     } else if (!strcmp(r->uri, "/api/config") || !strcmp(r->uri, "/api/import") ||
-        !strcmp(r->uri, "/api/setup") || !strcmp(r->uri, "/api/wifi-test")) {
+               !strcmp(r->uri, "/api/setup") || !strcmp(r->uri, "/api/wifi-test")) {
         bool setup = !strcmp(r->uri, "/api/setup") || !strcmp(r->uri, "/api/wifi-test");
         if (setup && !ghost_setup)
             rc = error(r, "403 Forbidden", "Physical Setup Mode required");
@@ -693,6 +915,7 @@ static esp_err_t asset(httpd_req_t *r) {
         return error(r, "404 Not Found", "Not found");
     }
     httpd_resp_set_hdr(r, "Content-Encoding", "gzip");
+    httpd_resp_set_hdr(r, "Cache-Control", "no-store, max-age=0");
     httpd_resp_set_type(r, type);
     return httpd_resp_send(r, (const char *)p, end - p);
 }

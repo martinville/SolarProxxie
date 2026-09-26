@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "packet_offset": 4,
+  "name": "Example 300-byte packet",
+  "layout": 300,
+  "data_points": [
+    {
+      "id": "battery_soc",
+      "name": "Battery SOC",
+      "unit": "%",
+      "type": "u16",
+      "scale": 1,
+      "add": 0,
+      "register": 184,
+      "offset": 244
+    },
+    {
+      "id": "pv_power_total",
+      "name": "PV power total",
+      "unit": "W",
+      "type": "u32",
+      "scale": 1,
+      "add": 0,
+      "registers": [186, 187],
+      "offsets": [246, 248]
+    },
+    {
+      "id": "combined_power",
+      "name": "Combined power",
+      "unit": "W",
+      "type": "u16",
+      "scale": 1,
+      "add": 0,
+      "sum_of": "pv_power_total battery_soc"
+    }
+  ]
+}

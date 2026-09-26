@@ -98,8 +98,13 @@ establish that this payload contains a complete RTU or Modbus TCP ADU. According
 Application envelope length fields, message-type fields, application checksum,
 sequence fields, acknowledgements, poll triggers and error responses remain unknown.
 The `a5` marker and size/calendar/serial checks are plausibility validation, not
-cryptographic authenticity or a verified application CRC. The parser does not claim
-checksum verification that the evidence does not support.
+cryptographic authenticity or a verified application CRC. The parser also rejects
+physically impossible values for the supported single-phase profile (for example,
+AC voltage above 600 V, SOC outside 0-100%, frequency above 100 Hz, or inverter
+temperature above 250 C). Multiple weaker contradictions, such as implausible
+frequency plus temperature/status values, also reject the complete frame. A zero
+temperature word is treated as unavailable rather than the protocol bias value
+`-100 C`. Rejected frames never replace the last good telemetry snapshot.
 
 The reference's sanitized packet uses remote TCP port 51100, but this is an
 **example**, not a universal endpoint. Firmware discovers observed destinations
@@ -107,9 +112,14 @@ without filtering to a fixed cloud IP/hostname/port. It does not infer a cloud
 hostname from reverse DNS or label all AP clients as dongles. Dongle detection means
 a plausible supported telemetry frame has been observed.
 
-Other daily/yearly energy values, warning/fault codes, generator, auxiliary/smart load,
-three-phase maps and model-specific status enumerations remain unmapped until
-their locations and meanings are supported by evidence.
+Several additional daily/yearly energy counters, warning/fault words, PV4 and
+phase-specific values now have evidence-backed candidate locations in the 306-byte
+layout. They are intentionally not part of the production field table until live
+values or model-specific captures confirm their semantics. Generator,
+auxiliary/smart-load, native three-phase maps and model-specific status enumerations
+remain unresolved. See [LONG1CAP_REGISTER_ANALYSIS.md](LONG1CAP_REGISTER_ANALYSIS.md)
+and the machine-readable research map in
+[`mappings/sunsynk-evidence-map.json`](../mappings/sunsynk-evidence-map.json).
 
 ## TCP and capture limits
 
@@ -190,11 +200,13 @@ offsets start at byte zero of the TCP application payload; values are unsigned
 
 The morning-to-afternoon capture changes track their mapped lifetime counters.
 The later ten-report capture preserves the names' plausibility but cannot prove
-them independently. These are enabled by default and use Home Assistant energy
-classification with `total_increasing` state. They remain unavailable on 292-
-and 302-byte frames; Modbus register numbers are not inferred from payload
-positions. Saved configurations gain only empty appended slots on upgrade, so
-existing per-field customizations remain in place. Yearly PV, inverter
-frequency, monthly grid energy, BMS SOC and constant-zero daily counters stay
-unmapped pending direct inverter-side confirmation. See
-[PCAP_LIVE_ANALYSIS.md](PCAP_LIVE_ANALYSIS.md) for the evidence and limits.
+them independently. They are defined by the self-contained numbered
+`packetoffsetNNN.json` files and use Home Assistant energy classification with
+`total_increasing` state. A fresh installation starts with the three shipped setup
+files. The additional
+`Long1cap.pcap` comparison supports battery daily discharge, grid daily export,
+yearly load energy, inverter frequency, PV4 and warning/fault words in the 306-byte
+profile. Yearly PV, monthly grid energy and BMS SOC are still unresolved. See
+[PCAP_LIVE_ANALYSIS.md](PCAP_LIVE_ANALYSIS.md) and
+[LONG1CAP_REGISTER_ANALYSIS.md](LONG1CAP_REGISTER_ANALYSIS.md) for the evidence and
+limits.

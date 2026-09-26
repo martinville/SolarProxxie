@@ -77,10 +77,11 @@ def payloads(path,layout):
         if len(streams)>=64 and key not in streams:streams.pop(next(iter(streams)))
         streams[key]=(expected,buf,timestamp)
 def main():
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('capture',type=Path);parser.add_argument('--layout',type=int,choices=[292,302,306],default=292);parser.add_argument('--modbus-start',type=int);parser.add_argument('--json',action='store_true');args=parser.parse_args()
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('capture',type=Path);parser.add_argument('--layout',type=int,choices=[292,302,306],default=292);parser.add_argument('--mapping',type=Path,default=ROOT/'mappings'/'sunsynk-inteless.json');parser.add_argument('--modbus-start',type=int);parser.add_argument('--json',action='store_true');args=parser.parse_args()
     exe=ROOT/'build/host'/('packet_decoder.exe' if sys.platform=='win32' else 'packet_decoder')
     if not exe.exists():parser.error('Run python tools/test_host.py to build the shared C decoder')
-    command=[str(exe)]
+    if not args.mapping.is_file():parser.error('Mapping file not found')
+    command=[str(exe),'--mapping',str(args.mapping)]
     if args.modbus_start is not None:
         if not 0<=args.modbus_start<=65535:parser.error('Invalid Modbus starting register')
         command+=['--modbus-start',str(args.modbus_start)]

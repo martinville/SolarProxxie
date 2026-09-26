@@ -2,10 +2,10 @@
 #include "config/config_v1.h"
 #include "mqtt/discovery.h"
 #include "nvs.h"
+#include "protocol/cloud_emulator.h"
+#include "protocol/dongle_identity.h"
 #include "protocol/packet_view.h"
 #include "protocol/pcap.h"
-#include "protocol/dongle_identity.h"
-#include "protocol/cloud_emulator.h"
 #include "protocol/telemetry_store.h"
 #include "security/security.h"
 #undef NDEBUG
@@ -16,6 +16,39 @@
 #include <string.h>
 extern int test_fail_commit;
 static unsigned frames;
+static ghost_config_t mapped;
+static cJSON *json_file(const char *path) {
+    FILE *file = fopen(path, "rb");
+    assert(file);
+    assert(!fseek(file, 0, SEEK_END));
+    long size = ftell(file);
+    assert(size > 0 && size < 24000 && !fseek(file, 0, SEEK_SET));
+    char *text = malloc((size_t)size + 1);
+    assert(text && fread(text, 1, (size_t)size, file) == (size_t)size);
+    fclose(file);
+    text[size] = 0;
+    cJSON *json = cJSON_Parse(text);
+    free(text);
+    assert(json);
+    return json;
+}
+static void load_mapping_files(ghost_config_t *config) {
+    char error[160];
+    for (unsigned file = 1; file <= 3; file++) {
+        char path[40];
+        snprintf(path, sizeof(path), "mappings/packetoffset%03u.json", file);
+        cJSON *mapping = json_file(path);
+        assert(ghost_packet_offsets_from_json(config, file - 1, mapping, error, sizeof(error)));
+        cJSON_Delete(mapping);
+    }
+}
+static void load_test_mapping(void) {
+    ghost_config_defaults(&mapped);
+    assert(mapped.field_count == 0);
+    load_mapping_files(&mapped);
+    assert(mapped.field_count == 62);
+    ghost_packet_mappings_apply(mapped.fields, mapped.field_count, mapped.packet_mappings);
+}
 static void emit(const uint8_t *p, size_t n, void *arg) {
     ghost_values_t v;
     assert(ghost_inteless_decode(p, n, &v));
@@ -30,11 +63,23 @@ static void sample(uint8_t *p, size_t n) {
     p[39] = 29;
     p[40] = 12;
     p[41] = 30;
+    size_t dc = n == 292 ? 106 : 114, ac = n == 292 ? 108 : 116, battery = n == 292 ? 240 : 248;
+    p[dc] = p[ac] = p[battery] = 4;
+    p[dc + 1] = p[ac + 1] = p[battery + 1] = 176; /* 20 C after the -100 bias. */
 }
 static void cloud_emulator_tests(void) {
-    const uint8_t query[] = {0x12, 0x34, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0,
+    uint8_t startup_clock[6];
+    assert(ghost_cloud_fallback_clock(startup_clock, "Sep 23 2026", "23:59:58", 5,
+                                      GHOST_CLOUD_ROLE_REDIRECT));
+    assert(!memcmp(startup_clock, (uint8_t[]){26, 9, 24, 0, 0, 3}, 6));
+    assert(ghost_cloud_fallback_clock(startup_clock, "Dec 31 2027", "23:00:00", 0,
+                                      GHOST_CLOUD_ROLE_TELEMETRY));
+    assert(!memcmp(startup_clock, (uint8_t[]){28, 1, 1, 1, 0, 0}, 6));
+    assert(!ghost_cloud_fallback_clock(startup_clock, "invalid", "00:00:00", 0,
+                                       GHOST_CLOUD_ROLE_TELEMETRY));
+    const uint8_t query[] = {0x12, 0x34, 1,   0,   0,   1,   0, 0,   0,   0,   0,   0,
                              5,    'u',  'k', 'i', 'o', 't', 7, 's', 'u', 'n', 's', 'y',
-                             'n',  'k',  3,   'n', 'e', 't', 0, 0, 1, 0, 1};
+                             'n',  'k',  3,   'n', 'e', 't', 0, 0,   1,   0,   1};
     size_t end = 0;
     ghost_cloud_role_t role = GHOST_CLOUD_ROLE_UNKNOWN;
     assert(ghost_cloud_dns_name(query, sizeof(query), &end, &role) && end == sizeof(query));
@@ -118,6 +163,11 @@ static void protocol_tests(void) {
     sample(p, 292);
     size_t soc = field("battery_soc"), temp = field("battery_temperature"),
            grid = field("grid_voltage");
+    ghost_field_t no_fields[GHOST_FIELDS_MAX] = {0};
+    ghost_packet_mapping_t no_mappings[GHOST_PACKET_PROFILE_COUNT][GHOST_FIELDS_MAX] = {0};
+    ghost_packet_mappings_apply(no_fields, 0, no_mappings);
+    assert(ghost_inteless_decode(p, 292, &v) && v.valid == 0 && ghost_field_count == 0);
+    ghost_packet_mappings_apply(mapped.fields, mapped.field_count, mapped.packet_mappings);
     p[244] = 0;
     p[245] = 54;
     p[240] = 4;
@@ -128,6 +178,23 @@ static void protocol_tests(void) {
     assert(v.value[soc] == 54);
     assert(fabs(v.value[temp] - 21) < 1e-9);
     assert(fabs(v.value[grid] - 233.3) < 1e-9);
+    ghost_packet_mapping_t mappings[GHOST_PACKET_PROFILE_COUNT][GHOST_FIELDS_MAX] = {0};
+    mappings[0][soc].state = GHOST_PACKET_MAPPING_OFFSET;
+    mappings[0][soc].position[0] = 246;
+    p[246] = 0;
+    p[247] = 67;
+    ghost_packet_mappings_apply(mapped.fields, mapped.field_count, mappings);
+    assert(ghost_inteless_decode(p, 292, &v) && v.value[soc] == 67);
+    mappings[0][soc].state = GHOST_PACKET_MAPPING_DISABLED;
+    ghost_packet_mappings_apply(mapped.fields, mapped.field_count, mappings);
+    assert(ghost_inteless_decode(p, 292, &v) && !(v.valid & (UINT64_C(1) << soc)));
+    memset(mappings, 0, sizeof(mappings));
+    ghost_packet_mappings_apply(mapped.fields, mapped.field_count, mapped.packet_mappings);
+    uint8_t implausible[292];
+    memcpy(implausible, p, sizeof(implausible));
+    implausible[176] = 0x37;
+    implausible[177] = 0x32; /* 1413.0 V: wrong record alignment, never valid telemetry. */
+    assert(!ghost_inteless_decode(implausible, sizeof(implausible), &v));
     for (size_t n = 0; n < 292; n++)
         assert(!ghost_inteless_decode(p, n, &v));
     p[38] = 13;
@@ -207,7 +274,86 @@ static void config_tests(void) {
     assert(ghost_config_init(&valid) == ESP_OK && !valid);
     ghost_config_t c;
     ghost_config_get(&c);
+    assert(!c.imperial_units);
+    assert(c.field_count == 0);
     char err[160];
+    load_mapping_files(&c);
+    assert(c.field_count == 62);
+    size_t battery_soc = 0;
+    while (battery_soc < c.field_count && strcmp(c.fields[battery_soc].id, "battery_soc"))
+        battery_soc++;
+    assert(battery_soc < c.field_count);
+    assert(c.packet_mappings[0][battery_soc].state == GHOST_PACKET_MAPPING_OFFSET);
+    uint16_t original_legacy_offset = c.packet_mappings[0][battery_soc].position[0];
+    uint16_t original_newer_offset = c.packet_mappings[1][battery_soc].position[0];
+    uint16_t original_306_offset = c.packet_mappings[2][battery_soc].position[0];
+    for (unsigned slot = 0; slot < 3; slot++) {
+        cJSON *download = ghost_packet_offsets_json(&c, slot);
+        assert(download &&
+               cJSON_GetObjectItem(download, "packet_offset")->valueint == (int)slot + 1);
+        assert(cJSON_GetArraySize(cJSON_GetObjectItem(download, "data_points")) == 62);
+        char *download_text = cJSON_PrintUnformatted(download);
+        assert(download_text && strlen(download_text) < 24000);
+        free(download_text);
+        cJSON_Delete(download);
+    }
+    assert(!ghost_packet_offsets_json(&c, 3));
+
+    cJSON *upload_meta = cJSON_Parse(
+        "{\"version\":1,\"packet_offset\":4,\"name\":\"Upload test\",\"layout\":300,\"point_count\":1}");
+    cJSON *upload_chunk = cJSON_Parse(
+        "{\"data_points\":[{\"id\":\"test_voltage\",\"name\":\"Test voltage\",\"unit\":\"V\",\"type\":\"u16\",\"offset\":100}]}");
+    assert(upload_meta && upload_chunk);
+    assert(ghost_packet_upload_begin(3, upload_meta, err, sizeof(err)));
+    assert(ghost_packet_upload_chunk(upload_chunk, err, sizeof(err)));
+    ghost_config_t *uploaded = ghost_packet_upload_finish(err, sizeof(err));
+    assert(uploaded && uploaded->field_count == 1 && uploaded->packet_profile_active[3]);
+    assert(uploaded->packet_mappings[3][0].position[0] == 100);
+    free(uploaded);
+    ghost_packet_upload_cancel();
+    cJSON_Delete(upload_meta);
+    cJSON_Delete(upload_chunk);
+
+    cJSON *offset_file = ghost_packet_offsets_json(&c, 1);
+    assert(offset_file && cJSON_GetObjectItem(offset_file, "packet_offset")->valueint == 2);
+    assert(!strcmp(cJSON_GetObjectItem(offset_file, "name")->valuestring, "Newer 302-byte packet"));
+    cJSON *offset_fields = cJSON_GetObjectItem(offset_file, "data_points");
+    cJSON *soc_offset = NULL;
+    cJSON *offset_item;
+    cJSON_ArrayForEach(offset_item, offset_fields) {
+        cJSON *id = cJSON_GetObjectItem(offset_item, "id");
+        if (cJSON_IsString(id) && !strcmp(id->valuestring, "battery_soc")) {
+            soc_offset = offset_item;
+            break;
+        }
+    }
+    assert(soc_offset);
+    cJSON_ReplaceItemInObject(soc_offset, "offset", cJSON_CreateNumber(254));
+    assert(ghost_packet_offsets_from_json(&c, 1, offset_file, err, sizeof(err)));
+    assert(c.packet_mappings[1][battery_soc].position[0] == 254);
+    assert(c.packet_mappings[0][battery_soc].position[0] == original_legacy_offset);
+    assert(c.packet_mappings[2][battery_soc].position[0] == original_306_offset);
+    assert(!ghost_packet_offsets_from_json(&c, 0, offset_file, err, sizeof(err)));
+    cJSON_Delete(offset_file);
+
+    ghost_config_t wire_config = c;
+    cJSON *wire = cJSON_Parse(
+        "{\"version\":1,\"packet_offset\":4,\"name\":\"Wire upload\",\"layout\":292,"
+        "\"data_points_jsonl\":\"{\\\"id\\\":\\\"battery_soc\\\",\\\"name\\\":\\\"Battery SOC\\\","
+        "\\\"unit\\\":\\\"%\\\",\\\"type\\\":\\\"u16\\\",\\\"scale\\\":1,\\\"add\\\":0,"
+        "\\\"register\\\":184,\\\"offset\\\":244}\"}");
+    assert(wire && ghost_packet_offsets_from_json(&wire_config, 3, wire, err, sizeof(err)));
+    assert(wire_config.packet_profile_active[3] && wire_config.field_count == 1 &&
+           wire_config.packet_mappings[3][0].position[0] == 244);
+    cJSON_Delete(wire);
+
+    cJSON *mapping =
+        cJSON_Parse("{\"version\":1,\"packet_offset\":4,\"name\":\"Bad\",\"layout\":292,"
+                    "\"data_points\":[{\"id\":\"battery_soc\",\"name\":\"SOC\",\"unit\":\"%\","
+                    "\"type\":\"u16\",\"offset\":291}]}");
+    assert(mapping && !ghost_packet_offsets_from_json(&c, 3, mapping, err, sizeof(err)));
+    cJSON_Delete(mapping);
+    memset(c.packet_mappings, 0, sizeof(c.packet_mappings));
     const char *setup =
         "{\"sta_ssid\":\"TestWifi\",\"sta_password\":\"test-password\",\"ap_password\":\"test-ap-"
         "password\",\"admin\":\"admin\",\"admin_password\":\"test-admin-password\"}";
@@ -228,6 +374,13 @@ static void config_tests(void) {
     j = cJSON_Parse("{\"version\":999}");
     assert(!ghost_config_from_json(&c, j, false, err, sizeof(err)));
     cJSON_Delete(j);
+    j = cJSON_Parse("{\"imperial_units\":true}");
+    assert(ghost_config_from_json(&c, j, false, err, sizeof(err)) && c.imperial_units);
+    cJSON_Delete(j);
+    assert(!strcmp(ghost_display_unit(&c, field("battery_temperature")), "\xc2\xb0"
+                                                                         "F"));
+    assert(fabs(ghost_display_value(&c, field("battery_temperature"), 20.0) - 68.0) < 1e-9);
+    c.imperial_units = false;
     assert(cJSON_Parse("[[[[[[[[[[[[[0]]]]]]]]]]]]]") == NULL);
     ghost_config_t migrated;
     assert(ghost_config_migrate(GHOST_CONFIG_VERSION, &c, sizeof(c), &migrated) == ESP_OK);
@@ -253,7 +406,7 @@ static void config_tests(void) {
     memcpy(ap_password, c.ap_password, sizeof(ap_password));
     memcpy(salt, c.salt, sizeof(salt));
     memcpy(hash, c.hash, sizeof(hash));
-    j = cJSON_Parse("{\"sta_password\":\"********\",\"ap_password\":\"********\"," 
+    j = cJSON_Parse("{\"sta_password\":\"********\",\"ap_password\":\"********\","
                     "\"admin_password\":\"********\"}");
     assert(ghost_config_from_json(&c, j, true, err, sizeof(err)));
     assert(!memcmp(c.sta_password, sta_password, sizeof(sta_password)) &&
@@ -283,8 +436,8 @@ static void config_tests(void) {
 }
 static void security_tests(void) {
     uint8_t salt[16] = {0}, hash[32], legacy[32];
-    assert(ghost_password_hash_iterations("test-password", salt,
-                                          GHOST_LEGACY_KDF_ITERATIONS, legacy));
+    assert(
+        ghost_password_hash_iterations("test-password", salt, GHOST_LEGACY_KDF_ITERATIONS, legacy));
     const uint8_t expected[32] = {0x84, 0xa8, 0x45, 0x2b, 0x8e, 0xc8, 0x03, 0x98, 0x5e, 0xaa, 0x34,
                                   0x33, 0x3f, 0xd7, 0x3f, 0x82, 0x0a, 0xfe, 0x3b, 0x26, 0xc7, 0x8c,
                                   0xaf, 0x82, 0xfb, 0xb6, 0x83, 0xab, 0xba, 0x62, 0x42, 0x06};
@@ -312,8 +465,28 @@ static void mqtt_capture_tests(void) {
     assert(j);
     assert(!strcmp(cJSON_GetObjectItem(j, "unique_id")->valuestring,
                    "ghost_0123456789ab_1_battery_soc"));
+    assert(!strcmp(cJSON_GetObjectItem(j, "state_topic")->valuestring,
+                   "solarproxxie/INVERTER1/state"));
+    assert(!strcmp(cJSON_GetObjectItem(j, "value_template")->valuestring,
+                   "{{ value_json['battery_soc'] }}"));
     assert(cJSON_GetArraySize(cJSON_GetObjectItem(j, "availability")) == 2);
     cJSON_Delete(j);
+    ghost_values_t values = {0};
+    values.valid = UINT64_C(1) << i;
+    values.value[i] = 54;
+    char *snapshot = ghost_snapshot_json(&c, &values);
+    assert(snapshot);
+    j = cJSON_Parse(snapshot);
+    free(snapshot);
+    assert(j && cJSON_GetObjectItem(j, "battery_soc")->valuedouble == 54);
+    assert(cJSON_IsNull(cJSON_GetObjectItem(j, "battery_voltage")));
+    cJSON_Delete(j);
+    values.valid = UINT64_MAX;
+    for (size_t field_index = 0; field_index < ghost_field_count; field_index++)
+        values.value[field_index] = 123456.789;
+    snapshot = ghost_snapshot_json(&c, &values);
+    assert(snapshot && strlen(snapshot) < 4096);
+    free(snapshot);
     strcpy(c.entities[i].ha_name, "Garage Inverter Battery");
     j = ghost_discovery_json(&c, i, "ghost_0123456789ab", 0, "1.0.0");
     assert(!strcmp(cJSON_GetObjectItem(j, "unique_id")->valuestring,
@@ -400,13 +573,15 @@ static void multi_dongle_tests(void) {
     char topic[192];
     strcpy(c.entities[i].suffix, "sunsynk/battery_soc");
     assert(ghost_mapped_topic(topic, sizeof(topic), &c, 0, i) &&
-           !strcmp(topic, "solarproxxie/INVERTER1/battery_soc"));
+           !strcmp(topic, "solarproxxie/INVERTER1/state"));
     assert(ghost_mapped_topic(topic, sizeof(topic), &c, 1, i) &&
-           !strcmp(topic, "solarproxxie/INVERTER2/battery_soc"));
+           !strcmp(topic, "solarproxxie/INVERTER2/state"));
     assert(!ghost_mapped_topic(topic, 8, &c, 1, i));
     assert(!ghost_mapped_topic(topic, sizeof(topic), &c, 2, i));
     cJSON *j = ghost_discovery_json(&c, i, "ghost_0123456789ab", 1, "1.0.0");
     assert(j);
+    assert(!strcmp(cJSON_GetObjectItem(j, "value_template")->valuestring,
+                   "{{ value_json['battery_soc'] }}"));
     assert(!strcmp(cJSON_GetObjectItem(j, "unique_id")->valuestring,
                    "ghost_0123456789ab_2_battery_soc"));
     cJSON *device = cJSON_GetObjectItem(j, "device");
@@ -421,10 +596,10 @@ static void multi_dongle_tests(void) {
     assert(cJSON_GetArraySize(cJSON_GetObjectItem(j, "dongles")) == GHOST_DONGLES_MAX);
     assert(cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(j, "dongles"), 1), "layout")
                ->valueint == 306);
-    assert(!strcmp(cJSON_GetObjectItem(
-                       cJSON_GetArrayItem(cJSON_GetObjectItem(j, "dongles"), 1), "profile")
-                       ->valuestring,
-                   "inteless_sp_captured_306"));
+    assert(!strcmp(
+        cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(j, "dongles"), 1), "profile")
+            ->valuestring,
+        "packetoffset003"));
     assert(cJSON_IsTrue(cJSON_GetObjectItem(
         cJSON_GetArrayItem(cJSON_GetObjectItem(j, "dongles"), 1), "cloud_forward")));
     assert(ghost_config_from_json(&c, j, false, err, sizeof(err)));
@@ -435,8 +610,7 @@ static void multi_dongle_tests(void) {
     c.version = 2;
     c.layout = 302;
     ghost_config_t migrated;
-    assert(ghost_config_migrate(2, &c, offsetof(ghost_config_t, dongles[4]), &migrated) ==
-           ESP_OK);
+    assert(ghost_config_migrate(2, &c, offsetof(ghost_config_t, dongles[4]), &migrated) == ESP_OK);
     assert(migrated.version == GHOST_CONFIG_VERSION && migrated.dongle_layouts[0] == 302 &&
            migrated.dongle_profiles[0] == GHOST_PROFILE_INTELESS_SP_NEWER &&
            migrated.dongle_layouts[1] == 302 && !strcmp(migrated.dongles[1].name, "GARAGE") &&
@@ -453,6 +627,12 @@ static void multi_dongle_tests(void) {
            ESP_OK);
     assert(migrated.dongle_profiles[0] == GHOST_PROFILE_INTELESS_SP_CAPTURED_306 &&
            migrated.dongle_layouts[0] == 306 && !migrated.dongle_cloud[0]);
+    c = migrated;
+    c.version = 5;
+    c.imperial_units = true;
+    assert(ghost_config_migrate(5, &c, offsetof(ghost_config_t, imperial_units), &migrated) ==
+           ESP_OK);
+    assert(migrated.version == GHOST_CONFIG_VERSION && !migrated.imperial_units);
     c.dongle_profiles[0] = GHOST_PROFILE_INTELESS_SP_LEGACY;
     c.dongle_layouts[0] = 292;
     c.version = GHOST_CONFIG_VERSION;
@@ -461,7 +641,8 @@ static void multi_dongle_tests(void) {
     memcpy(&legacy, &c, sizeof(legacy));
     legacy.version = 1;
     assert(ghost_config_migrate(1, &legacy, sizeof(legacy), &migrated) == ESP_OK);
-    assert(migrated.version == GHOST_CONFIG_VERSION && !strcmp(migrated.ap_password, c.ap_password));
+    assert(migrated.version == GHOST_CONFIG_VERSION &&
+           !strcmp(migrated.ap_password, c.ap_password));
     assert(!memcmp(migrated.hash, c.hash, sizeof(c.hash)));
     assert(!migrated.dongles[0].ip[0] && !strcmp(migrated.dongles[0].name, "INVERTER1"));
     nvs_handle_t storage;
@@ -485,9 +666,9 @@ static void multi_dongle_tests(void) {
     assert(ghost_store_update(&store, 2, &v, 200));
     ghost_source_t source;
     ghost_store_get(&store, 1, &source);
-    assert(source.values.value[0] == 10 && source.updated == 100);
+    assert(source.values.value[0] == 10 && source.updated == 100 && source.field_updated[0] == 100);
     ghost_store_get(&store, 2, &source);
-    assert(source.values.value[0] == 20 && source.updated == 200);
+    assert(source.values.value[0] == 20 && source.updated == 200 && source.field_updated[0] == 200);
     strcpy(v.serial, "SERIAL0003");
     assert(!ghost_store_update(&store, 1, &v, 300));
     ghost_store_get(&store, 1, &source);
@@ -517,7 +698,7 @@ static void multi_dongle_tests(void) {
     strcpy(c.dongles[1].ip, "192.168.50.3");
     strcpy(c.entities[i].suffix, "battery_soc");
     assert(ghost_mapped_topic(topic, sizeof(topic), &c, 0, i) &&
-           !strcmp(topic, "solarproxxie/INVERTER1/battery_soc"));
+           !strcmp(topic, "solarproxxie/INVERTER1/state"));
     strcpy(c.ap_ssid, "ESPGhostNode");
     strcpy(c.base, "espghostnode");
     strcpy(c.client, "espghostnode");
@@ -569,8 +750,8 @@ static void load_split_tests(void) {
     assert(!(v.valid & (UINT64_C(1) << ups)));
     ghost_config_t c, m;
     ghost_config_get(&c);
-    memset(&c.entities[42], 0, (ghost_field_count - 42) * sizeof(c.entities[0]));
     assert(ghost_config_migrate(c.version, &c, sizeof(c), &m) == ESP_OK);
+    assert(m.field_count == mapped.field_count);
     assert(m.entities[home].enabled && m.entities[ups].enabled);
     assert(!strcmp(m.entities[ups].suffix, "ups_power"));
     m.entities[ups].enabled = false;
@@ -580,7 +761,7 @@ static void load_split_tests(void) {
     strcpy(c.dongles[0].ip, "192.168.50.2");
     char topic[192];
     assert(ghost_mapped_topic(topic, sizeof(topic), &c, 0, home));
-    assert(!strcmp(topic, "solarproxxie/INVERTER1/home_load_power"));
+    assert(!strcmp(topic, "solarproxxie/INVERTER1/state"));
     puts(
         "PASS load split: signed flows, clamping, missing inputs, UPS profile, migration and MQTT");
 }
@@ -622,7 +803,7 @@ static void captured_temperature_tests(void) {
     ghost_stream_feed(&st, 1, p, 612, emit, NULL);
     assert(frames == 2);
     ghost_config_t c;
-    ghost_config_defaults(&c);
+    c = mapped;
     c.layout = 306;
     strcpy(c.dongles[0].ip, "192.168.50.2");
     cJSON *j =
@@ -632,8 +813,21 @@ static void captured_temperature_tests(void) {
                                                                                "C"));
     assert(!strcmp(cJSON_GetObjectItem(j, "device_class")->valuestring, "temperature"));
     cJSON_Delete(j);
-    puts("PASS 306 profile: Celsius, legitimate negatives, unknown BMS suppressed, stream "
-         "boundaries");
+    c.imperial_units = true;
+    j = ghost_discovery_json(&c, field("battery_temperature"), "ghost_0123456789ab", 0, "1.0.0");
+    assert(j);
+    assert(!strcmp(cJSON_GetObjectItem(j, "unit_of_measurement")->valuestring, "\xc2\xb0"
+                                                                               "F"));
+    cJSON_Delete(j);
+    char *snapshot = ghost_snapshot_json(&c, &v);
+    assert(snapshot);
+    j = cJSON_Parse(snapshot);
+    free(snapshot);
+    assert(j);
+    assert(fabs(cJSON_GetObjectItem(j, "battery_temperature")->valuedouble - 14.0) < 1e-9);
+    cJSON_Delete(j);
+    puts("PASS 306 profile: metric/imperial temperatures, legitimate negatives, unknown BMS "
+         "suppressed, stream boundaries");
 }
 static void captured_energy_tests(void) {
     const char *ids[] = {"battery_charge_daily", "grid_import_daily", "load_energy_daily",
@@ -661,13 +855,13 @@ static void captured_energy_tests(void) {
     for (size_t i = 0; i < sizeof(ids) / sizeof(ids[0]); i++)
         assert(!(values.valid & (UINT64_C(1) << field(ids[i]))));
     ghost_config_t config;
-    ghost_config_defaults(&config);
+    config = mapped;
     strcpy(config.dongles[0].ip, "192.168.50.2");
     size_t index = field("pv_energy_daily");
     assert(config.entities[index].enabled);
     char topic[192];
     assert(ghost_mapped_topic(topic, sizeof(topic), &config, 0, index));
-    assert(!strcmp(topic, "solarproxxie/INVERTER1/pv_energy_daily"));
+    assert(!strcmp(topic, "solarproxxie/INVERTER1/state"));
     cJSON *discovery = ghost_discovery_json(&config, index, "ghost_0123456789ab", 0, "1.0.0");
     assert(discovery);
     assert(!strcmp(cJSON_GetObjectItem(discovery, "state_class")->valuestring, "total_increasing"));
@@ -675,6 +869,7 @@ static void captured_energy_tests(void) {
     puts("PASS 306 energy counters: scaling, layout isolation, MQTT topic and discovery");
 }
 int main(void) {
+    load_test_mapping();
     cloud_emulator_tests();
     identity_tests();
     captured_energy_tests();

@@ -90,6 +90,25 @@ bool ghost_config_validate(const ghost_config_t *c, char *error, unsigned size) 
             !memchr(e->suffix, 0, sizeof(e->suffix)) || !memchr(e->unit, 0, sizeof(e->unit)))
             FAIL("Unterminated datapoint field");
     }
+    if (c->field_count > GHOST_FIELDS_MAX)
+        FAIL("Too many data points");
+    for (size_t i = 0; i < c->field_count; i++) {
+        const ghost_field_t *field = &c->fields[i];
+        if (!memchr(field->id, 0, sizeof(field->id)) ||
+            !memchr(field->device_class, 0, sizeof(field->device_class)) ||
+            !memchr(field->state_class, 0, sizeof(field->state_class)))
+            FAIL("Unterminated mapping definition");
+        if (!field->id[0] || field->type > GHOST_ENUM || field->words > 2 ||
+            (!field->sum_count && !field->words) || (field->sum_count && field->words) ||
+            field->sum_count > sizeof(field->sum_fields))
+            FAIL("Invalid mapping definition");
+        for (unsigned term = 0; term < field->sum_count; term++)
+            if (field->sum_fields[term] < 0 || (size_t)field->sum_fields[term] >= i)
+                FAIL("Invalid derived mapping source");
+        for (size_t previous = 0; previous < i; previous++)
+            if (!strcmp(field->id, c->fields[previous].id))
+                FAIL("Duplicate mapping data point id");
+    }
 #undef TERMINATED
     uint32_t probe;
     if (!ghost_ipv4(c->probe_ip, &probe) || !unicast(probe))
@@ -116,12 +135,16 @@ bool ghost_config_validate(const ghost_config_t *c, char *error, unsigned size) 
         if (!memchr(map->ip, 0, sizeof(map->ip)) || !memchr(map->name, 0, sizeof(map->name)) ||
             !ghost_dongle_name_valid(map->name))
             FAIL("Dongle names: 1-24 letters, digits, underscore or hyphen; start with a letter");
-        unsigned profile_layout =
-            ghost_decoder_profile_layout((ghost_decoder_profile_t)c->dongle_profiles[i]);
-        if (!profile_layout || c->dongle_layouts[i] != profile_layout)
-            FAIL("Select a supported decoder profile for each inverter");
+        unsigned profile = c->dongle_profiles[i];
+        unsigned profile_layout = profile >= 1 && profile <= GHOST_PACKET_PROFILE_COUNT &&
+                                          c->packet_profile_active[profile - 1]
+                                      ? c->packet_profile_layouts[profile - 1]
+                                      : 0;
         if (!map->ip[0])
             continue;
+        if (!profile_layout || profile_layout > GHOST_FRAME_MAX ||
+            c->dongle_layouts[i] != profile_layout)
+            FAIL("Select an active packet-offset setup for each inverter");
         if (!ghost_ipv4(map->ip, &mapped) || !unicast(mapped) || mapped == a ||
             (mapped & m) != (a & m) || !(mapped & ~m) || (mapped & ~m) == ~m)
             FAIL("Dongle IP must be a client address on the SolarProxxie AP subnet");
@@ -138,6 +161,21 @@ bool ghost_config_validate(const ghost_config_t *c, char *error, unsigned size) 
                 FAIL("Active dongle IPs and names must be unique");
         }
     }
+    for (unsigned p = 0; p < GHOST_PACKET_PROFILE_COUNT; p++)
+        for (size_t i = 0; i < GHOST_FIELDS_MAX; i++) {
+            const ghost_packet_mapping_t *mapping = &c->packet_mappings[p][i];
+            if (mapping->state > GHOST_PACKET_MAPPING_DISABLED)
+                FAIL("Invalid uploaded packet mapping state");
+            if (mapping->state != GHOST_PACKET_MAPPING_OFFSET)
+                continue;
+            if (i >= c->field_count || !c->fields[i].words || !c->packet_profile_active[p] ||
+                mapping->position[0] < 43 ||
+                mapping->position[0] + 2 > c->packet_profile_layouts[p] ||
+                (c->fields[i].words == 2 &&
+                 (mapping->position[1] < 43 ||
+                  mapping->position[1] + 2 > c->packet_profile_layouts[p])))
+                FAIL("Uploaded packet mapping offset is outside its packet");
+        }
     if (!c->dhcp) {
         if (!ghost_network_valid(c->ip, c->mask, c->gateway) || !strcmp(c->ip, c->gateway))
             FAIL("Invalid static IP, mask or gateway");
@@ -151,8 +189,8 @@ bool ghost_config_validate(const ghost_config_t *c, char *error, unsigned size) 
         if (c->dns2[0] && (!ghost_ipv4(c->dns2, &d) || !unicast(d) || !strcmp(c->dns2, c->ap_ip)))
             FAIL("Invalid secondary DNS");
     }
-    if (c->layout != 292 && c->layout != 302 && c->layout != 306)
-        FAIL("Select a 292, 302 or 306 byte Inteless layout");
+    if (c->layout < 43 || c->layout > GHOST_FRAME_MAX)
+        FAIL("Select a valid Inteless packet length");
     if (!c->port || c->keepalive < 15 || c->keepalive > 3600 || c->min_interval < 1 ||
         c->max_interval < c->min_interval || c->stale_seconds < 30 || c->log_level > 5)
         FAIL("Invalid operational intervals or log level");
@@ -165,14 +203,14 @@ bool ghost_config_validate(const ghost_config_t *c, char *error, unsigned size) 
         if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9') ||
               *p == '.' || *p == '-'))
             FAIL("Broker must be a hostname or IPv4 address, without a URL scheme");
-    for (size_t i = 0; i < ghost_field_count; i++) {
+    for (size_t i = 0; i < c->field_count; i++) {
         if (!ghost_topic_valid(c->entities[i].suffix) ||
             !ghost_topic_valid(ghost_field_suffix(c->entities[i].suffix)))
-            FAIL("Invalid datapoint topic suffix");
+            FAIL("Invalid data point JSON key");
         for (size_t j = 0; j < i; j++)
             if (!strcmp(ghost_field_suffix(c->entities[i].suffix),
                         ghost_field_suffix(c->entities[j].suffix)))
-                FAIL("Duplicate datapoint topic suffix");
+                FAIL("Duplicate data point JSON key");
     }
     return true;
 #undef FAIL

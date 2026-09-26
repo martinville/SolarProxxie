@@ -1,4 +1,5 @@
 #include "app.h"
+#include "esp_app_desc.h"
 #include "esp_log.h"
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
@@ -17,7 +18,7 @@ typedef struct {
     uint8_t input[GHOST_CLOUD_FRAME_MAX];
 } offline_client_t;
 
-static atomic_uint accepted, rejected, responses, protocol_errors, active;
+static atomic_uint accepted, rejected, responses, protocol_errors, active, fallback_clock_responses;
 static atomic_bool listening, reset_clients;
 static TaskHandle_t offline_task;
 static offline_client_t clients[GHOST_DONGLES_MAX];
@@ -82,10 +83,15 @@ static ghost_cloud_role_t claim_role(uint32_t ip) {
     return role;
 }
 
-static bool clock_bytes(uint8_t out[6], ghost_cloud_role_t role) {
+static bool clock_bytes(uint8_t out[6], ghost_cloud_role_t role, bool *synchronized) {
     time_t now = time(NULL);
-    if (now < 1704067200) /* 2024-01-01: wait for SNTP rather than send a 1970 clock. */
-        return false;
+    *synchronized = now >= 1704067200;
+    if (!*synchronized) {
+        const esp_app_desc_t *app = esp_app_get_description();
+        if (!ghost_cloud_fallback_clock(out, app->date, app->time, ghost_millis() / 1000, role))
+            return false;
+        return true;
+    }
     if (role == GHOST_CLOUD_ROLE_TELEMETRY)
         now += 2 * 60 * 60; /* Captured UK endpoint supplies the inverter's UTC+2 clock. */
     struct tm value = {0};
@@ -146,7 +152,8 @@ static bool process_client(offline_client_t *client) {
         if (client->used < frame)
             break;
         uint8_t reply[GHOST_CLOUD_FRAME_MAX], clock[6];
-        bool clock_valid = clock_bytes(clock, client->role);
+        bool clock_synchronized = false;
+        bool clock_valid = clock_bytes(clock, client->role, &clock_synchronized);
         size_t length = ghost_cloud_response(client->input, frame, reply, sizeof(reply),
                                              clock_valid ? clock : NULL, client->role);
         if (!length) {
@@ -154,7 +161,7 @@ static bool process_client(offline_client_t *client) {
                      "Unsupported cloud request type 0x%02x (role=%s, clock=%s)",
                      client->input[3],
                      client->role == GHOST_CLOUD_ROLE_REDIRECT ? "redirect" : "telemetry",
-                     clock_valid ? "ready" : "not-ready");
+                     clock_synchronized ? "network" : clock_valid ? "firmware-fallback" : "invalid");
             atomic_fetch_add(&protocol_errors, 1);
             return false;
         }
@@ -168,6 +175,8 @@ static bool process_client(offline_client_t *client) {
                  client->input[3], (unsigned)length,
                  client->role == GHOST_CLOUD_ROLE_REDIRECT ? "redirect" : "telemetry");
         atomic_fetch_add(&responses, 1);
+        if (client->input[3] == 0x01 && !clock_synchronized)
+            atomic_fetch_add(&fallback_clock_responses, 1);
         client->used -= frame;
         memmove(client->input, client->input + frame, client->used);
     }
@@ -310,12 +319,18 @@ static void server(void *arg) {
 void ghost_offline_start(void) {
     xTaskCreate(server, "offline_cloud", 4096, NULL, 3, &offline_task);
 }
+bool ghost_offline_ready(void) {
+    return atomic_load(&listening);
+}
 
 cJSON *ghost_offline_status(void) {
     cJSON *json = cJSON_CreateObject();
     cJSON_AddBoolToObject(json, "enabled", atomic_load(&ghost_offline_active));
     cJSON_AddBoolToObject(json, "server_ready", atomic_load(&listening));
-    cJSON_AddBoolToObject(json, "clock_ready", time(NULL) >= 1704067200);
+    cJSON_AddBoolToObject(json, "clock_ready", true);
+    cJSON_AddBoolToObject(json, "clock_synchronized", time(NULL) >= 1704067200);
+    cJSON_AddNumberToObject(json, "fallback_clock_responses",
+                            atomic_load(&fallback_clock_responses));
     cJSON_AddNumberToObject(json, "active_connections", atomic_load(&active));
     cJSON_AddNumberToObject(json, "accepted_connections", atomic_load(&accepted));
     cJSON_AddNumberToObject(json, "rejected_connections", atomic_load(&rejected));

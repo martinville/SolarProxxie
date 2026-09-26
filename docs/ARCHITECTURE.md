@@ -61,7 +61,7 @@ retained in RAM. Live PCAP allocates its bounded queue only while downloading.
 Telemetry/capture data uses a short mutex outside the network hook. Configurations
 are copied under a separate mutex; HTTP validates a candidate before saving it.
 Large config copies are heap-allocated in low-frequency tasks, not on task stacks.
-Gzip assets are served directly from mapped flash. Datapoints and configuration
+Gzip assets are served directly from mapped flash. Data points, packet-offset files and configuration
 responses stream one JSON entry at a time to avoid building a large JSON tree.
 JSON parser nesting is limited to 12. No filesystem is mounted.
 
@@ -93,8 +93,18 @@ per-mapping packet layouts. Version 4 appends per-dongle cloud-forwarding flags;
 v3's global choice is copied to every slot during migration. Older versions migrate
 in RAM on boot. Version 5 appends stable per-dongle decoder profile IDs and derives
 the packet length from each profile; v4 numeric layouts migrate automatically. V5
-is persisted on the next successful save. Unknown versions/sizes are rejected
-without erasure. Old firmware cannot read v5 records after a save.
+is persisted on the next successful save. Version 6 appends the global
+Metric/Imperial display and publishing preference; v5 records migrate to Metric.
+Version 7 appended per-profile packet-offset overrides. Version 8 removes the
+dependency on C-defined field definitions and appends the complete uploaded field
+definitions. Version 9 adds eight independently managed packet-offset setup slots.
+Fresh installations, factory resets, and older records receive the three shipped,
+self-contained JSON files, which are embedded as firmware data and parsed rather
+than translated into hardcoded C offset tables. Uploaded version-1 setup files are
+validated and saved with the main NVS record, then copied into runtime decoder
+storage. Each upload replaces only its numbered slot. Unknown versions/sizes are
+rejected without erasure. Old firmware
+cannot read v9 records after a save.
 Never change a deployed record layout without a new reader.
 The host tests use an NVS stub; actual power-cut atomicity remains a hardware test.
 

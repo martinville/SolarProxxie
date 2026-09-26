@@ -5,34 +5,24 @@ uint16_t ghost_be16(const uint8_t *p) {
 }
 void ghost_derive_values(ghost_values_t *values) {
     for (size_t i = 0; i < ghost_field_count; i++) {
-        const char *next = ghost_fields[i].sum_of;
-        if (!next || !*next)
+        const ghost_field_t *field = &ghost_fields[i];
+        if (!field->sum_count)
             continue;
         values->valid &= ~(UINT64_C(1) << i);
         double sum = 0;
         bool all = true;
-        while (*next) {
-            bool subtract = *next == '-';
-            if (subtract) next++;
-            const char *end = strchr(next, ' ');
-            size_t n = end ? (size_t)(end - next) : strlen(next);
-            size_t j;
-            for (j = 0; j < i; j++)
-                if (strlen(ghost_fields[j].id) == n && !memcmp(ghost_fields[j].id, next, n))
-                    break;
-            if (j == i || !(values->valid & (UINT64_C(1) << j))) {
+        for (unsigned term = 0; term < field->sum_count; term++) {
+            size_t j = (uint8_t)field->sum_fields[term];
+            if (j >= i || !(values->valid & (UINT64_C(1) << j))) {
                 all = false;
                 break;
             }
-            sum += subtract ? -values->value[j] : values->value[j];
-            if (!end)
-                break;
-            next = end + 1;
+            sum += (field->sum_subtract & (1U << term)) ? -values->value[j] : values->value[j];
         }
         if (all) {
-            if (!strcmp(ghost_fields[i].id, "home_load_power") && sum < 0)
-                sum = 0;
             values->value[i] = sum * ghost_fields[i].scale + ghost_fields[i].offset;
+            if (ghost_fields[i].has_minimum && values->value[i] < ghost_fields[i].minimum)
+                values->value[i] = ghost_fields[i].minimum;
             values->valid |= UINT64_C(1) << i;
         }
     }

@@ -27,6 +27,9 @@ bool ghost_store_update(ghost_store_t *store, uint32_t ip, const ghost_values_t 
         return false;
     target->values = *values;
     target->updated = now;
+    for (size_t i = 0; i < GHOST_FIELDS_MAX; i++)
+        if (values->valid & (UINT64_C(1) << i))
+            target->field_updated[i] = now;
     target->frames++;
     return true;
 }

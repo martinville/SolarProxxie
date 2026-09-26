@@ -4,7 +4,7 @@
  * 292 with a complete older record. No unverified envelope length is inferred. */
 void ghost_stream_feed(ghost_stream_t *s, uint32_t seq, const uint8_t *p, size_t n,
                        ghost_frame_fn emit, void *context) {
-    if (!s || !p || !n || !emit || (s->frame_length != 292 && s->frame_length != 302 && s->frame_length != 306))
+    if (!s || !p || !n || !emit || s->frame_length < 43 || s->frame_length > GHOST_FRAME_MAX)
         return;
     if (s->active) {
         int32_t delta = (int32_t)(seq - s->next_seq);

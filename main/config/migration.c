@@ -22,6 +22,28 @@ typedef struct {
     uint16_t dongle_layouts[GHOST_DONGLES_MAX];
     bool dongle_cloud[GHOST_DONGLES_MAX];
 } ghost_config_v4_t;
+typedef struct {
+    ghost_config_v1_t base;
+    uint32_t mapping_reserved;
+    ghost_dongle_t dongles[GHOST_DONGLES_MAX];
+    uint16_t dongle_layouts[GHOST_DONGLES_MAX];
+    bool dongle_cloud[GHOST_DONGLES_MAX];
+    uint8_t dongle_profiles[GHOST_DONGLES_MAX];
+} ghost_config_v5_t;
+typedef struct {
+    ghost_config_v5_t base;
+    bool imperial_units;
+} ghost_config_v6_t;
+typedef struct {
+    ghost_config_v5_t base;
+    bool imperial_units;
+    ghost_packet_mapping_t packet_mappings[3][GHOST_FIELDS_MAX];
+} ghost_config_v7_t;
+typedef struct {
+    ghost_config_v7_t base;
+    uint32_t field_count;
+    ghost_field_t fields[GHOST_FIELDS_MAX];
+} ghost_config_v8_t;
 _Static_assert(offsetof(ghost_config_t, mapping_reserved) == sizeof(ghost_config_v1_t),
                "Version 1 prefix must retain its exact on-flash layout");
 _Static_assert(offsetof(ghost_config_t, dongles[4]) == sizeof(ghost_config_v2_t),
@@ -30,6 +52,10 @@ _Static_assert(offsetof(ghost_config_t, dongle_cloud) == sizeof(ghost_config_v3_
                "Version 3 prefix must retain its exact on-flash layout");
 _Static_assert(offsetof(ghost_config_t, dongle_profiles) == sizeof(ghost_config_v4_t),
                "Version 4 prefix must retain its exact on-flash layout");
+_Static_assert(offsetof(ghost_config_t, imperial_units) == sizeof(ghost_config_v5_t),
+               "Version 5 prefix must retain its exact on-flash layout");
+_Static_assert(offsetof(ghost_config_t, packet_mappings) + 2 == sizeof(ghost_config_v6_t),
+               "Version 6 record must differ only by its former tail padding");
 esp_err_t ghost_config_migrate(uint32_t version, const void *record, size_t size,
                                ghost_config_t *out) {
     if (!record || !out)
@@ -38,16 +64,6 @@ esp_err_t ghost_config_migrate(uint32_t version, const void *record, size_t size
         ghost_config_defaults(out);
         memcpy(out, record, size);
         out->version = GHOST_CONFIG_VERSION;
-        for (size_t i = 0; i < ghost_field_count; i++) {
-            char legacy_name[80];
-            snprintf(legacy_name, sizeof(legacy_name), "Sunsynk %s", ghost_fields[i].name);
-            if (!strncmp(out->entities[i].name, legacy_name, sizeof(out->entities[i].name)))
-                snprintf(out->entities[i].name, sizeof(out->entities[i].name), "%s",
-                         ghost_fields[i].name);
-            if (!strncmp(out->entities[i].ha_name, legacy_name, sizeof(out->entities[i].ha_name)))
-                snprintf(out->entities[i].ha_name, sizeof(out->entities[i].ha_name), "%s",
-                         ghost_fields[i].name);
-        }
     } else if (version == 2 && size == sizeof(ghost_config_v2_t)) {
         ghost_config_defaults(out);
         memcpy(out, record, size);
@@ -67,6 +83,31 @@ esp_err_t ghost_config_migrate(uint32_t version, const void *record, size_t size
         ghost_config_defaults(out);
         memcpy(out, record, size);
         out->version = GHOST_CONFIG_VERSION;
+    } else if (version == 5 && size == sizeof(ghost_config_v5_t)) {
+        ghost_config_defaults(out);
+        memcpy(out, record, size);
+        out->version = GHOST_CONFIG_VERSION;
+    } else if (version == 6 && size == sizeof(ghost_config_v6_t)) {
+        ghost_config_defaults(out);
+        /* V6 ended with two alignment bytes. Do not copy those bytes into the
+         * first uploaded mapping in the extended V7 structure. */
+        memcpy(out, record, offsetof(ghost_config_t, packet_mappings));
+        out->version = GHOST_CONFIG_VERSION;
+    } else if (version == 7 && size == sizeof(ghost_config_v7_t)) {
+        ghost_config_defaults(out);
+        /* Preserve operational settings, but replace the former firmware-owned
+         * override table with the current shipped JSON files. */
+        memcpy(out, record, offsetof(ghost_config_t, packet_mappings));
+        out->version = GHOST_CONFIG_VERSION;
+    } else if (version == 8 && size == sizeof(ghost_config_v8_t)) {
+        const ghost_config_v8_t *old = record;
+        ghost_config_defaults(out);
+        memcpy(out, record, offsetof(ghost_config_t, packet_mappings));
+        memcpy(out->packet_mappings, old->base.packet_mappings,
+               sizeof(old->base.packet_mappings));
+        out->field_count = old->field_count;
+        memcpy(out->fields, old->fields, sizeof(old->fields));
+        out->version = GHOST_CONFIG_VERSION;
     } else if (version == GHOST_CONFIG_VERSION && size == sizeof(*out)) {
         memcpy(out, record, size);
     } else {
@@ -83,17 +124,6 @@ esp_err_t ghost_config_migrate(uint32_t version, const void *record, size_t size
     if (version < 5)
         for (unsigned i = 0; i < GHOST_DONGLES_MAX; i++)
             out->dongle_profiles[i] = ghost_decoder_profile_from_layout(out->dongle_layouts[i]);
-    /* Older records have zero-filled unused slots. Initialize only appended fields. */
-    for (size_t i = 42; i < ghost_field_count; i++) {
-        ghost_entity_t empty = {0};
-        ghost_entity_t *e = &out->entities[i];
-        if (memcmp(e, &empty, sizeof(empty))) continue;
-        e->enabled = true;
-        snprintf(e->suffix, sizeof(e->suffix), "%s", ghost_fields[i].id);
-        snprintf(e->name, sizeof(e->name), "%s", ghost_fields[i].name);
-        snprintf(e->ha_name, sizeof(e->ha_name), "%s", ghost_fields[i].name);
-        snprintf(e->unit, sizeof(e->unit), "%s", ghost_fields[i].unit);
-    }
     char error[100];
     if (!ghost_config_validate(out, error, sizeof(error)))
         return ESP_ERR_INVALID_ARG;

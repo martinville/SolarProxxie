@@ -6,3 +6,4 @@ bool ghost_state_topic(char *out, size_t capacity, const char *base, const char 
 bool ghost_mapped_topic(char *out, size_t capacity, const ghost_config_t *c, unsigned slot,
                         size_t field);
 bool ghost_discovery_field_configured(const ghost_config_t *c, unsigned slot, size_t field);
+char *ghost_snapshot_json(const ghost_config_t *c, const ghost_values_t *values);

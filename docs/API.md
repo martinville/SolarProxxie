@@ -1,4 +1,4 @@
-# Local HTTP API (configuration schema 3)
+# Local HTTP API (configuration schema 8)
 
 HTTP port 80. Paths are exact and do not currently accept query-string filtering.
 JSON responses use `application/json`. An error contains `{"error":"message"}`
@@ -43,6 +43,7 @@ Failed logins have increasing delay. Responses never return password hashes/salt
 | `/api/mqtt` | connection, test result, sent/failure and dataset timing |
 | `/api/config` | operational settings; additional public critical values in setup |
 | `/api/export` | operational-only JSON with no password fields |
+| `/api/packet-offsets/001` through `/api/packet-offsets/008` | one self-contained packet-offset setup; inactive slots return 404 |
 | `/api/scan` | setup-only array of SSID, RSSI, ESP-IDF auth-mode number |
 | `/api/packets` | Debug-only observed connections and live-stream status |
 | `/api/capture-stream` | Debug-only streaming PCAP download; records until stopped or disconnected, one active download |
@@ -82,7 +83,7 @@ The same resolver validates passthrough targets. Network status also includes
   reconnected. Normal administrator session and CSRF token are required.
 
 - `/api/config` and `/api/import`: partial operational JSON. All input is validated
-  before the candidate replaces NVS/RAM state. `version` if present must be 3.
+  before the candidate replaces NVS/RAM state. `version` if present must be 7.
 - `/api/setup`: physical setup only; accepts network/AP/admin settings plus
   operational settings. Requires an admin password 12–128 bytes and a valid AP
   passphrase. Requires successful testing of the same STA configuration, or
@@ -104,6 +105,7 @@ The same resolver validates passthrough targets. Network status also includes
 Operational keys: `debug`, `mqtt_enabled`, `broker`, `port`, `mqtt_user`,
 `mqtt_password`, `base`, `client`, `keepalive`, `retain`, `discovery`,
 `discovery_prefix`, `on_change`, `min_interval`, `max_interval`, `stale_seconds`,
+`imperial_units` (false for °C, true for °F temperature presentation),
 `layout` (legacy fallback: 292, 302 or 306), `log_level` (1 ERROR through 5 TRACE), `probe_enabled`,
 `probe_ip`, `entities`, `dongles`.
 
@@ -145,8 +147,8 @@ internal positions stable when adding or removing one:
 
 ```json
 {"dongles":[
-  {"ip":"192.168.50.2","name":"INVERTER1","profile":"inteless_sp_captured_306","cloud_forward":true},
-  {"ip":"192.168.50.3","name":"INVERTER2","profile":"inteless_sp_legacy","cloud_forward":false}
+  {"ip":"192.168.50.2","name":"INVERTER1","profile":"packetoffset003","cloud_forward":true},
+  {"ip":"192.168.50.3","name":"INVERTER2","profile":"packetoffset001","cloud_forward":false}
 ]}
 ```
 
@@ -156,16 +158,70 @@ addresses on the configured AP subnet; blank disables a slot. Invalid arrays are
 rejected before saving. `profile` is a stable decoder identity; packet length is
 only one of its properties. The legacy numeric `layout` input remains accepted for
 backward compatibility. `cloud_forward` controls routed traffic independently for
-each dongle. Mappings are included in config export/import. NVS versions 1 and 2
-migrate to version 5 while preserving network and credential fields and assigning
+each dongle. Mappings are included in config export/import. Older NVS versions
+migrate to version 8 while preserving network and credential fields and assigning
 their former shared layout. Version 3 records migrate their former global cloud
 choice to every slot. Version 4 layouts migrate to named decoder profiles. Old
-versioned JSON exports must be reviewed and updated to version 5.
+versioned JSON exports must be reviewed and updated to version 8.
+
+### Uploadable packet mappings
+
+Each numbered file is a complete setup containing its packet length, data-point
+definitions, scaling, formulas, registers and byte offsets. Every accepted upload
+is persisted in NVS and takes effect immediately:
+
+| Endpoint | Download filename | Contents |
+| --- | --- | --- |
+| `/api/packet-offsets/001` … `/008` | `packetoffsetNNN.json` | one complete packet-decoding setup |
+
+`GET` downloads one active file. To add or replace a slot, post its metadata
+(`version`, `packet_offset`, `name`, `layout`, `point_count`) to
+`/api/packet-offsets/NNN/begin`, post batches of `data_points` to
+`/api/packet-offsets/NNN/chunk`, then post `{}` to
+`/api/packet-offsets/NNN/commit`. The browser handles these requests when a
+file is selected.
+Posting `{"delete":true}` deletes the slot unless a configured dongle still uses it.
+
+On a first installation or after a factory reset, these endpoints are already
+populated from the three authoritative JSON files embedded in the firmware image.
+The files are parsed at startup; measurement offsets are not duplicated in C code.
+`POST /api/mapping-defaults` with `{}` restores those three embedded files without
+changing network, authentication, dongle or MQTT settings.
+
+```json
+{
+  "version": 1,
+  "packet_offset": 2,
+  "name": "Newer 302-byte packet",
+  "layout": 302,
+  "data_points": [{
+    "id": "battery_soc",
+    "name": "Battery SOC",
+    "unit": "%",
+    "type": "u16",
+    "scale": 1,
+    "add": 0,
+    "device_class": "battery",
+    "state_class": "measurement",
+    "offset": 252
+  }]
+}
+```
+
+Offsets are zero-based byte positions in the complete packet
+packet and must leave room for a big-endian 16-bit word. Two-word fields require
+exactly two offsets. A numbered file must declare its matching `packet_offset`,
+name and packet layout. Fields may occur only once. Derived fields omit byte
+offsets. Out-of-range offsets, files over 24 KB, and malformed JSON are rejected
+without replacing saved data. Omitted offsets are unavailable only in that setup.
+The repository includes complete ready-to-upload
+files in [`../mappings`](../mappings/).
 
 ### Debug packet capture
 
 Authenticated Debug Mode exposes `/api/packets` with observed `connections` and
 live-stream `status`. `/api/capture-stream` starts an asynchronous PCAP response;
 `stop-stream` finishes it. Packets use a bounded queue only while a download is
-active and are not retained in RAM or flash. No new active protocol requests are
-sent.
+active and are not retained in RAM or flash. The browser-local inspector can filter
+the opened file by an IP appearing as either source or destination and keeps its
+packet table in a bounded scrolling viewport. No new active protocol requests are sent.

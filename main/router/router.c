@@ -8,10 +8,10 @@
 #include "lwip/netif.h"
 #include "lwip/pbuf.h"
 #include "lwip/sockets.h"
-#include <errno.h>
-#include "protocol/pcap.h"
-#include "protocol/dongle_identity.h"
 #include "protocol/cloud_emulator.h"
+#include "protocol/dongle_identity.h"
+#include "protocol/pcap.h"
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #define SNAP 768
@@ -34,6 +34,11 @@ static atomic_uint stream_drops;
 static atomic_uint stream_packets;
 static uint64_t stream_started_ms;
 static atomic_uint record_length = 292;
+static atomic_uint record_profile = 1;
+#ifdef CONFIG_GHOST_TEST_PACKET_REPLAY
+static atomic_uint replay_soc_offsets[GHOST_PACKET_PROFILE_COUNT];
+static atomic_uint replay_temperature_offsets[GHOST_PACKET_PROFILE_COUNT];
+#endif
 static struct {
     uint32_t ip;
     uint16_t layout;
@@ -62,6 +67,7 @@ typedef struct {
     ghost_stream_t stream;
     ghost_identity_stream_t identity_stream;
     bool identity_found;
+    uint8_t profile;
 } flow_t;
 static flow_t flows[GHOST_DONGLES_MAX];
 static atomic_ullong decoder_heartbeat;
@@ -98,10 +104,9 @@ bool ghost_router_local_enabled(void) {
 }
 
 static bool spoof_cloud_dns(struct pbuf *packet) {
-    size_t copied = pbuf_copy_partial(packet, dns_input,
-                                      packet->tot_len < sizeof(dns_input) ? packet->tot_len
-                                                                          : sizeof(dns_input),
-                                      0);
+    size_t copied = pbuf_copy_partial(
+        packet, dns_input,
+        packet->tot_len < sizeof(dns_input) ? packet->tot_len : sizeof(dns_input), 0);
     if (copied < 20 || dns_input[0] >> 4 != 4 || dns_input[9] != 17)
         return false;
     size_t ihl = (dns_input[0] & 15) * 4;
@@ -177,7 +182,8 @@ static bool web_gui_packet(struct pbuf *p, bool downstream) {
     if (!target || p->tot_len < 24)
         return false;
     uint8_t header[64];
-    size_t copied = pbuf_copy_partial(p, header, p->tot_len < sizeof(header) ? p->tot_len : sizeof(header), 0);
+    size_t copied =
+        pbuf_copy_partial(p, header, p->tot_len < sizeof(header) ? p->tot_len : sizeof(header), 0);
     if (copied < 24 || header[0] >> 4 != 4 || header[9] != 6)
         return false;
     size_t ihl = (header[0] & 15) * 4;
@@ -228,7 +234,8 @@ int ghost_ip4_canforward(struct pbuf *p, unsigned int dest) {
 }
 static void decoded_frame(const uint8_t *p, size_t n, void *context) {
     ghost_values_t v;
-    if (!ghost_inteless_decode(p, n, &v)) {
+    unsigned profile = context ? ((flow_t *)context)->profile : atomic_load(&record_profile);
+    if (!profile || !ghost_inteless_decode_profile(p, n, profile - 1, &v)) {
         atomic_fetch_add(&rejected, 1);
         return;
     }
@@ -237,6 +244,8 @@ static void decoded_frame(const uint8_t *p, size_t n, void *context) {
     bool accepted = ghost_store_update(&telemetry, ip, &v, ghost_millis());
     xSemaphoreGive(data_lock);
     atomic_fetch_add(accepted ? &decoded : &rejected, 1);
+    if (accepted)
+        ghost_mqtt_notify_telemetry();
 }
 static uint32_t be32(const uint8_t *p) {
     return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3];
@@ -285,9 +294,11 @@ static void parse(packet_t *p) {
         f->dport = dport;
     }
     unsigned layout = atomic_load(&record_length);
+    unsigned profile = atomic_load(&record_profile);
     for (unsigned i = 0; i < GHOST_DONGLES_MAX; i++)
         if (source_layouts[i].ip == src && src) {
             layout = source_layouts[i].layout;
+            profile = source_layouts[i].profile;
             break;
         }
     if (p->ms - f->seen > 30000 || (tcp[13] & 6) || f->stream.frame_length != layout)
@@ -297,6 +308,7 @@ static void parse(packet_t *p) {
         f->identity_found = false;
     }
     f->stream.frame_length = layout;
+    f->profile = profile;
     f->seen = p->ms;
     if (p->downstream)
         f->replies++;
@@ -313,8 +325,7 @@ static void parse(packet_t *p) {
                     target = i;
                     break;
                 }
-                if (!identities[i].ip ||
-                    identities[i].observed_ms < identities[target].observed_ms)
+                if (!identities[i].ip || identities[i].observed_ms < identities[target].observed_ms)
                     target = i;
             }
             identities[target].ip = src;
@@ -345,11 +356,20 @@ static void decoder(void *arg) {
             sample[38] = 2;
             sample[39] = 29;
             sample[40] = 12;
-            unsigned d = n != 292 ? 8 : 0;
-            sample[244 + d] = 0;
-            sample[245 + d] = 54;
-            sample[240 + d] = 4;
-            sample[241 + d] = 186;
+            unsigned profile = atomic_load(&record_profile);
+            unsigned index = profile ? profile - 1 : GHOST_PACKET_PROFILE_COUNT;
+            if (index < GHOST_PACKET_PROFILE_COUNT) {
+                unsigned soc = atomic_load(&replay_soc_offsets[index]);
+                unsigned temperature = atomic_load(&replay_temperature_offsets[index]);
+                if (soc && soc + 1 < n) {
+                    sample[soc] = 0;
+                    sample[soc + 1] = 54;
+                }
+                if (temperature && temperature + 1 < n) {
+                    sample[temperature] = 4;
+                    sample[temperature + 1] = 176;
+                }
+            }
             decoded_frame(sample, n, NULL);
             replay_at = ghost_millis();
         }
@@ -377,22 +397,42 @@ void ghost_router_start(void) {
         xTaskCreatePinnedToCore(decoder, "decoder", 4096, NULL, 4, &ghost_decoder_task, 1);
 }
 void ghost_router_config(const ghost_config_t *c) {
+    ghost_packet_mappings_apply(c->fields, c->field_count, c->packet_mappings);
+#ifdef CONFIG_GHOST_TEST_PACKET_REPLAY
+    for (unsigned profile = 0; profile < GHOST_PACKET_PROFILE_COUNT; profile++) {
+        atomic_store(&replay_soc_offsets[profile], 0);
+        atomic_store(&replay_temperature_offsets[profile], 0);
+        for (size_t field = 0; field < c->field_count; field++) {
+            const ghost_packet_mapping_t *mapping = &c->packet_mappings[profile][field];
+            if (mapping->state != GHOST_PACKET_MAPPING_OFFSET)
+                continue;
+            if (!strcmp(c->fields[field].id, "battery_soc"))
+                atomic_store(&replay_soc_offsets[profile], mapping->position[0]);
+            else if (!strcmp(c->fields[field].id, "battery_temperature"))
+                atomic_store(&replay_temperature_offsets[profile], mapping->position[0]);
+        }
+    }
+#endif
     if (data_lock)
         xSemaphoreTake(data_lock, portMAX_DELAY);
-    unsigned previous_default = atomic_load(&record_length);
-    ghost_decoder_profile_t previous_default_profile =
-        ghost_decoder_profile_from_layout(previous_default);
+    unsigned previous_default_profile = atomic_load(&record_profile);
+    unsigned default_profile = 0;
+    for (unsigned p = 0; p < GHOST_PACKET_PROFILE_COUNT; p++)
+        if (c->packet_profile_active[p]) {
+            default_profile = p + 1;
+            break;
+        }
     for (unsigned i = 0; i < GHOST_TELEMETRY_SLOTS; i++) {
         uint32_t ip = telemetry.sources[i].ip;
         if (!ip)
             continue;
-        ghost_decoder_profile_t previous = previous_default_profile;
-        ghost_decoder_profile_t next = ghost_decoder_profile_from_layout(c->layout);
+        unsigned previous = previous_default_profile;
+        unsigned next = default_profile;
         for (unsigned j = 0; j < GHOST_DONGLES_MAX; j++) {
             if (source_layouts[j].ip == ip)
-                previous = (ghost_decoder_profile_t)source_layouts[j].profile;
+                previous = source_layouts[j].profile;
             if (c->dongles[j].ip[0] && inet_addr(c->dongles[j].ip) == ip)
-                next = (ghost_decoder_profile_t)c->dongle_profiles[j];
+                next = c->dongle_profiles[j];
         }
         if (previous != next) {
             memset(&telemetry.sources[i], 0, sizeof(telemetry.sources[i]));
@@ -401,12 +441,17 @@ void ghost_router_config(const ghost_config_t *c) {
                     memset(&flows[j].stream, 0, sizeof(flows[j].stream));
         }
     }
-    atomic_store(&record_length, c->layout);
+    atomic_store(&record_profile, default_profile);
+    atomic_store(&record_length,
+                 default_profile ? c->packet_profile_layouts[default_profile - 1] : 0);
     for (unsigned i = 0; i < GHOST_DONGLES_MAX; i++) {
         source_layouts[i].ip = c->dongles[i].ip[0] ? inet_addr(c->dongles[i].ip) : 0;
         source_layouts[i].profile = c->dongle_profiles[i];
-        source_layouts[i].layout =
-            ghost_decoder_profile_layout((ghost_decoder_profile_t)c->dongle_profiles[i]);
+        unsigned profile = c->dongle_profiles[i];
+        source_layouts[i].layout = profile >= 1 && profile <= GHOST_PACKET_PROFILE_COUNT &&
+                                           c->packet_profile_active[profile - 1]
+                                       ? c->packet_profile_layouts[profile - 1]
+                                       : 0;
         atomic_store(&route_ips[i], source_layouts[i].ip);
         atomic_store(&route_cloud[i], c->dongle_cloud[i]);
     }

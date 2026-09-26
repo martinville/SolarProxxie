@@ -113,6 +113,9 @@ static void dns_task(void *arg) {
 void ghost_dns_start(void) {
     xTaskCreate(dns_task, "dns_proxy", 3072, NULL, 3, &ghost_dns_task);
 }
+bool ghost_dns_ready(void) {
+    return atomic_load(&dns_ready);
+}
 cJSON *ghost_dns_status(void) {
     cJSON *j = cJSON_CreateObject();
     cJSON_AddBoolToObject(j, "ready", atomic_load(&dns_ready));

@@ -1,4 +1,7 @@
 #include "config.h"
+#ifdef ESP_PLATFORM
+#include "esp_log.h"
+#endif
 #include "esp_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -12,22 +15,21 @@ static ghost_config_t current;
 static SemaphoreHandle_t lock;
 static nvs_handle_t storage;
 const char *ghost_decoder_profile_id(ghost_decoder_profile_t profile) {
-    switch (profile) {
-    case GHOST_PROFILE_INTELESS_SP_LEGACY:
-        return "inteless_sp_legacy";
-    case GHOST_PROFILE_INTELESS_SP_NEWER:
-        return "inteless_sp_newer";
-    case GHOST_PROFILE_INTELESS_SP_CAPTURED_306:
-        return "inteless_sp_captured_306";
-    default:
-        return "";
-    }
+    static const char *ids[GHOST_PACKET_PROFILE_COUNT] = {
+        "packetoffset001", "packetoffset002", "packetoffset003", "packetoffset004",
+        "packetoffset005", "packetoffset006", "packetoffset007", "packetoffset008"};
+    return profile >= 1 && profile <= GHOST_PACKET_PROFILE_COUNT ? ids[profile - 1] : "";
 }
 ghost_decoder_profile_t ghost_decoder_profile_parse(const char *id) {
     if (!id)
         return GHOST_PROFILE_INVALID;
-    for (ghost_decoder_profile_t p = GHOST_PROFILE_INTELESS_SP_LEGACY;
-         p <= GHOST_PROFILE_INTELESS_SP_CAPTURED_306; p++)
+    if (!strcmp(id, "inteless_sp_legacy"))
+        return 1;
+    if (!strcmp(id, "inteless_sp_newer"))
+        return 2;
+    if (!strcmp(id, "inteless_sp_captured_306"))
+        return 3;
+    for (ghost_decoder_profile_t p = 1; p <= GHOST_PACKET_PROFILE_COUNT; p++)
         if (!strcmp(id, ghost_decoder_profile_id(p)))
             return p;
     return GHOST_PROFILE_INVALID;
@@ -39,10 +41,26 @@ ghost_decoder_profile_t ghost_decoder_profile_from_layout(unsigned layout) {
                            : GHOST_PROFILE_INVALID;
 }
 unsigned ghost_decoder_profile_layout(ghost_decoder_profile_t profile) {
-    return profile == GHOST_PROFILE_INTELESS_SP_LEGACY     ? 292
-           : profile == GHOST_PROFILE_INTELESS_SP_NEWER    ? 302
+    return profile == GHOST_PROFILE_INTELESS_SP_LEGACY         ? 292
+           : profile == GHOST_PROFILE_INTELESS_SP_NEWER        ? 302
            : profile == GHOST_PROFILE_INTELESS_SP_CAPTURED_306 ? 306
-                                                              : 0;
+                                                               : 0;
+}
+static bool temperature_field(const ghost_config_t *c, size_t field) {
+    return c && field < c->field_count && !strcmp(c->fields[field].device_class, "temperature");
+}
+double ghost_display_value(const ghost_config_t *c, size_t field, double value) {
+    return c && c->imperial_units && temperature_field(c, field) ? value * 9.0 / 5.0 + 32.0 : value;
+}
+const char *ghost_display_unit(const ghost_config_t *c, size_t field) {
+    if (!c || field >= c->field_count)
+        return "";
+    if (temperature_field(c, field))
+        return c->imperial_units ? "\xc2\xb0"
+                                   "F"
+                                 : "\xc2\xb0"
+                                   "C";
+    return c->entities[field].unit;
 }
 void ghost_config_defaults(ghost_config_t *c) {
     memset(c, 0, sizeof(*c));
@@ -52,6 +70,15 @@ void ghost_config_defaults(ghost_config_t *c) {
         c->dongle_layouts[d] = 292;
         c->dongle_profiles[d] = GHOST_PROFILE_INTELESS_SP_LEGACY;
         c->dongle_cloud[d] = true;
+    }
+    static const uint16_t shipped_layouts[] = {292, 302, 306};
+    static const char *shipped_names[] = {"Legacy 292-byte packet", "Newer 302-byte packet",
+                                          "Captured 306-byte packet"};
+    for (unsigned p = 0; p < 3; p++) {
+        c->packet_profile_active[p] = true;
+        c->packet_profile_layouts[p] = shipped_layouts[p];
+        snprintf(c->packet_profile_names[p], sizeof(c->packet_profile_names[p]), "%s",
+                 shipped_names[p]);
     }
     c->dhcp = true;
     strcpy(c->ap_ssid, "SolarProxxie");
@@ -74,14 +101,11 @@ void ghost_config_defaults(ghost_config_t *c) {
     c->log_level = 3;
     c->probe_enabled = true;
     strcpy(c->probe_ip, "1.1.1.1");
-    for (size_t i = 0; i < ghost_field_count; i++) {
-        ghost_entity_t *e = &c->entities[i];
-        e->enabled = true;
-        snprintf(e->suffix, sizeof(e->suffix), "%s", ghost_fields[i].id);
-        snprintf(e->name, sizeof(e->name), "%s", ghost_fields[i].name);
-        snprintf(e->ha_name, sizeof(e->ha_name), "%s", ghost_fields[i].name);
-        snprintf(e->unit, sizeof(e->unit), "%s", ghost_fields[i].unit);
-    }
+#ifdef ESP_PLATFORM
+    char mapping_error[160];
+    if (!ghost_packet_mapping_defaults(c, mapping_error, sizeof(mapping_error)))
+        ESP_LOGE("config", "Shipped packet mapping files are invalid: %s", mapping_error);
+#endif
 }
 esp_err_t ghost_config_init(bool *valid) {
     *valid = false;
@@ -116,6 +140,13 @@ esp_err_t ghost_config_init(bool *valid) {
 void ghost_config_get(ghost_config_t *c) {
     xSemaphoreTake(lock, portMAX_DELAY);
     *c = current;
+    xSemaphoreGive(lock);
+}
+const ghost_config_t *ghost_config_lock(void) {
+    xSemaphoreTake(lock, portMAX_DELAY);
+    return &current;
+}
+void ghost_config_unlock(void) {
     xSemaphoreGive(lock);
 }
 void ghost_config_probe(bool *enabled, char ip[16]) {
@@ -176,8 +207,8 @@ bool ghost_config_from_json(ghost_config_t *c, const cJSON *j, bool setup, char 
         return false;
     }
     const char *critical[] = {
-        "sta_ssid", "sta_password", "dhcp",  "ip",      "mask",  "gateway",        "dns1", "dns2",
-        "ap_ssid",  "ap_password",  "ap_ip", "ap_mask", "admin", "admin_password"};
+        "sta_ssid", "sta_password", "dhcp",        "ip",    "mask",    "gateway", "dns1",
+        "dns2",     "ap_ssid",      "ap_password", "ap_ip", "ap_mask", "admin",   "admin_password"};
     if (!setup)
         for (size_t i = 0; i < sizeof(critical) / sizeof(critical[0]); i++)
             if (cJSON_HasObjectItem(j, critical[i])) {
@@ -213,10 +244,9 @@ bool ghost_config_from_json(ghost_config_t *c, const cJSON *j, bool setup, char 
     if (setup) {
         STR(sta_ssid);
         v = cJSON_GetObjectItemCaseSensitive(j, "sta_password");
-        if (v && (!cJSON_IsString(v) ||
-                  (strcmp(v->valuestring, "********") &&
-                   !strfield(j, "sta_password", c->sta_password, sizeof(c->sta_password), err,
-                             cap))))
+        if (v && (!cJSON_IsString(v) || (strcmp(v->valuestring, "********") &&
+                                         !strfield(j, "sta_password", c->sta_password,
+                                                   sizeof(c->sta_password), err, cap))))
             return false;
         BOOL(dhcp);
         STR(ip);
@@ -228,8 +258,7 @@ bool ghost_config_from_json(ghost_config_t *c, const cJSON *j, bool setup, char 
         v = cJSON_GetObjectItemCaseSensitive(j, "ap_password");
         if (v && (!cJSON_IsString(v) ||
                   (strcmp(v->valuestring, "********") &&
-                   !strfield(j, "ap_password", c->ap_password, sizeof(c->ap_password), err,
-                             cap))))
+                   !strfield(j, "ap_password", c->ap_password, sizeof(c->ap_password), err, cap))))
             return false;
         STR(ap_ip);
         STR(ap_mask);
@@ -254,6 +283,7 @@ bool ghost_config_from_json(ghost_config_t *c, const cJSON *j, bool setup, char 
     BOOL(retain);
     BOOL(discovery);
     BOOL(on_change);
+    BOOL(imperial_units);
     BOOL(probe_enabled);
     STR(probe_ip);
     STR(broker);
@@ -303,18 +333,29 @@ bool ghost_config_from_json(ghost_config_t *c, const cJSON *j, bool setup, char 
                     snprintf(err, cap, "Choose a supported decoder profile for each inverter");
                     return false;
                 }
-                c->dongle_layouts[d] = ghost_decoder_profile_layout(c->dongle_profiles[d]);
+                unsigned selected = c->dongle_profiles[d] - 1;
+                c->dongle_layouts[d] =
+                    c->packet_profile_active[selected] ? c->packet_profile_layouts[selected] : 0;
             }
             const cJSON *layout = cJSON_GetObjectItemCaseSensitive(map, "layout");
             if (layout && !profile) {
-                if (!cJSON_IsNumber(layout) ||
-                    (layout->valueint != 292 && layout->valueint != 302 &&
-                     layout->valueint != 306) || layout->valuedouble != layout->valueint) {
-                    snprintf(err, cap, "Choose a 292, 302 or 306 byte layout for each inverter");
+                if (!cJSON_IsNumber(layout) || layout->valuedouble != layout->valueint) {
+                    snprintf(err, cap, "Choose an active packet-offset setup for each inverter");
+                    return false;
+                }
+                unsigned selected = GHOST_PACKET_PROFILE_COUNT;
+                for (unsigned p = 0; p < GHOST_PACKET_PROFILE_COUNT; p++)
+                    if (c->packet_profile_active[p] &&
+                        c->packet_profile_layouts[p] == layout->valueint) {
+                        selected = p;
+                        break;
+                    }
+                if (selected == GHOST_PACKET_PROFILE_COUNT) {
+                    snprintf(err, cap, "No active packet-offset setup has that packet length");
                     return false;
                 }
                 c->dongle_layouts[d] = layout->valueint;
-                c->dongle_profiles[d] = ghost_decoder_profile_from_layout(layout->valueint);
+                c->dongle_profiles[d] = selected + 1;
             }
             const cJSON *cloud = cJSON_GetObjectItemCaseSensitive(map, "cloud_forward");
             if (cloud) {
@@ -327,14 +368,14 @@ bool ghost_config_from_json(ghost_config_t *c, const cJSON *j, bool setup, char 
         }
         for (unsigned d = cJSON_GetArraySize(maps); d < GHOST_DONGLES_MAX; d++) {
             c->dongles[d].ip[0] = 0;
-            c->dongle_layouts[d] = c->layout;
-            c->dongle_profiles[d] = ghost_decoder_profile_from_layout(c->layout);
+            c->dongle_profiles[d] = 1;
+            c->dongle_layouts[d] = c->packet_profile_layouts[0];
             c->dongle_cloud[d] = true;
         }
     }
     const cJSON *array = cJSON_GetObjectItemCaseSensitive(j, "entities");
     if (array) {
-        if (!cJSON_IsArray(array) || cJSON_GetArraySize(array) > (int)ghost_field_count) {
+        if (!cJSON_IsArray(array) || cJSON_GetArraySize(array) > (int)c->field_count) {
             snprintf(err, cap, "Invalid entities");
             return false;
         }
@@ -343,10 +384,10 @@ bool ghost_config_from_json(ghost_config_t *c, const cJSON *j, bool setup, char 
         cJSON_ArrayForEach(e, array) {
             const cJSON *id = cJSON_GetObjectItemCaseSensitive(e, "id");
             size_t i;
-            for (i = 0; i < ghost_field_count; i++)
-                if (cJSON_IsString(id) && !strcmp(id->valuestring, ghost_fields[i].id))
+            for (i = 0; i < c->field_count; i++)
+                if (cJSON_IsString(id) && !strcmp(id->valuestring, c->fields[i].id))
                     break;
-            if (i == ghost_field_count || (seen & (UINT64_C(1) << i))) {
+            if (i == c->field_count || (seen & (UINT64_C(1) << i))) {
                 snprintf(err, cap, "Unknown or duplicate datapoint");
                 return false;
             }
@@ -383,17 +424,27 @@ cJSON *ghost_config_header_json(const ghost_config_t *c, bool setup) {
         cJSON *map = cJSON_CreateObject();
         cJSON_AddStringToObject(map, "ip", c->dongles[d].ip);
         cJSON_AddStringToObject(map, "name", c->dongles[d].name);
-        cJSON_AddStringToObject(map, "profile",
-                               ghost_decoder_profile_id(c->dongle_profiles[d]));
+        cJSON_AddStringToObject(map, "profile", ghost_decoder_profile_id(c->dongle_profiles[d]));
         cJSON_AddNumberToObject(map, "layout", c->dongle_layouts[d]);
         cJSON_AddBoolToObject(map, "cloud_forward", c->dongle_cloud[d]);
         cJSON_AddItemToArray(maps, map);
+    }
+    cJSON *profiles = cJSON_AddArrayToObject(j, "packet_profiles");
+    for (unsigned p = 0; p < GHOST_PACKET_PROFILE_COUNT; p++) {
+        cJSON *profile = cJSON_CreateObject();
+        cJSON_AddNumberToObject(profile, "slot", p + 1);
+        cJSON_AddBoolToObject(profile, "active", c->packet_profile_active[p]);
+        cJSON_AddStringToObject(profile, "id", ghost_decoder_profile_id(p + 1));
+        cJSON_AddStringToObject(profile, "name", c->packet_profile_names[p]);
+        cJSON_AddNumberToObject(profile, "layout", c->packet_profile_layouts[p]);
+        cJSON_AddItemToArray(profiles, profile);
     }
     B(debug);
     B(mqtt_enabled);
     B(retain);
     B(discovery);
     B(on_change);
+    B(imperial_units);
     S(broker);
     S(mqtt_user);
     S(base);
@@ -430,11 +481,11 @@ cJSON *ghost_config_header_json(const ghost_config_t *c, bool setup) {
 #undef N
 }
 cJSON *ghost_entity_json(const ghost_config_t *c, size_t i) {
-    if (i >= ghost_field_count)
+    if (i >= c->field_count)
         return NULL;
     const ghost_entity_t *e = &c->entities[i];
     cJSON *o = cJSON_CreateObject();
-    cJSON_AddStringToObject(o, "id", ghost_fields[i].id);
+    cJSON_AddStringToObject(o, "id", c->fields[i].id);
     cJSON_AddStringToObject(o, "name", e->name);
     cJSON_AddStringToObject(o, "ha_name", e->ha_name);
     cJSON_AddStringToObject(o, "suffix", e->suffix);
@@ -447,7 +498,7 @@ cJSON *ghost_config_json(const ghost_config_t *c, bool setup) {
     if (!j)
         return NULL;
     cJSON *a = cJSON_AddArrayToObject(j, "entities");
-    for (size_t i = 0; i < ghost_field_count; i++)
+    for (size_t i = 0; i < c->field_count; i++)
         cJSON_AddItemToArray(a, ghost_entity_json(c, i));
     return j;
 }

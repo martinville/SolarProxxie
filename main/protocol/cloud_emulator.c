@@ -1,6 +1,50 @@
 #include "cloud_emulator.h"
 #include <ctype.h>
+#include <stdio.h>
 #include <string.h>
+
+static bool leap(unsigned year) {
+    return year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+}
+
+bool ghost_cloud_fallback_clock(uint8_t out[6], const char *build_date, const char *build_time,
+                                uint64_t uptime_seconds, ghost_cloud_role_t role) {
+    if (!out || !build_date || !build_time || strlen(build_date) < 3)
+        return false;
+    static const char months[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
+    char abbreviation[4] = {build_date[0], build_date[1], build_date[2], 0};
+    const char *month = strstr(months, abbreviation);
+    unsigned day, year, hour, minute, second;
+    if (!month || (size_t)(month - months) % 3 ||
+        sscanf(build_date + 3, "%u %u", &day, &year) != 2 ||
+        sscanf(build_time, "%u:%u:%u", &hour, &minute, &second) != 3 || day < 1 || day > 31 ||
+        year < 2024 || year > 2099 || hour > 23 || minute > 59 || second > 59)
+        return false;
+    unsigned mon = (unsigned)(month - months) / 3 + 1;
+    uint64_t seconds = hour * 3600 + minute * 60 + second + uptime_seconds;
+    if (role == GHOST_CLOUD_ROLE_TELEMETRY)
+        seconds += 2 * 60 * 60;
+    day += (unsigned)(seconds / 86400);
+    seconds %= 86400;
+    for (;;) {
+        static const uint8_t days[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+        unsigned in_month = days[mon - 1] + (mon == 2 && leap(year));
+        if (day <= in_month)
+            break;
+        day -= in_month;
+        if (++mon == 13) {
+            mon = 1;
+            year++;
+        }
+    }
+    out[0] = year % 100;
+    out[1] = mon;
+    out[2] = day;
+    out[3] = seconds / 3600;
+    out[4] = seconds / 60 % 60;
+    out[5] = seconds % 60;
+    return true;
+}
 
 static bool name_is(const char *name, size_t length, const char *expected) {
     size_t wanted = strlen(expected);

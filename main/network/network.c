@@ -19,6 +19,7 @@ static atomic_uint retry = 1;
 static atomic_ullong connect_started;
 static atomic_bool testing;
 static uint8_t tested_settings[32];
+static char configured_ap_name[33];
 bool ghost_network_test_matches(const ghost_config_t *c) {
     uint8_t hash[32];
     mbedtls_sha256((const unsigned char *)c, offsetof(ghost_config_t, ap_ssid), hash, 0);
@@ -191,6 +192,7 @@ esp_err_t ghost_network_start(const ghost_config_t *c) {
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     wifi_config_t ap = {0}, sta = {0};
     const char *ap_name = ghost_setup ? "SolarProxxie-Setup" : c->ap_ssid;
+    strlcpy(configured_ap_name, ap_name, sizeof(configured_ap_name));
     ap.ap.ssid_len = strlen(ap_name);
     memcpy(ap.ap.ssid, ap_name, ap.ap.ssid_len);
     ap.ap.channel = 1;
@@ -209,6 +211,9 @@ esp_err_t ghost_network_start(const ghost_config_t *c) {
     /* NAPT stays available in normal mode; the router enforces each dongle's policy. */
     atomic_store(&cloud_requested, c->cloud && !ghost_setup);
     atomic_store(&ghost_cloud_enabled, c->cloud && !ghost_setup);
+    return ESP_OK;
+}
+esp_err_t ghost_network_activate(void) {
     ESP_ERROR_CHECK(esp_wifi_start());
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
     esp_netif_set_default_netif(ghost_sta);
@@ -219,8 +224,9 @@ esp_err_t ghost_network_start(const ghost_config_t *c) {
             ESP_LOGW("network", "SNTP initialization failed: %s", esp_err_to_name(time_result));
     }
     xTaskCreate(reconnect_task, "wifi_recovery", 2048, NULL, 4, &ghost_wifi_task);
-    ghost_dns_start();
-    ESP_LOGI("network", "AP: %s, IP: " IPSTR, ap_name, IP2STR(&ip.ip));
+    esp_netif_ip_info_t ip = {0};
+    esp_netif_get_ip_info(ghost_ap, &ip);
+    ESP_LOGI("network", "AP: %s, IP: " IPSTR, configured_ap_name, IP2STR(&ip.ip));
     return ESP_OK;
 }
 void ghost_network_restart(void) {

@@ -115,15 +115,30 @@ void app_main(void) {
     ghost_config_get(c);
     ESP_ERROR_CHECK(ghost_network_start(c));
     ghost_router_config(c);
+    free(c);
     ghost_router_start();
     if (!ghost_setup)
         ghost_offline_start();
+    ghost_dns_start();
+    /* The dongle may issue its only startup DNS/cloud handshake immediately after
+       associating. Do not expose the AP until the local services that answer it exist. */
+    bool services_ready = false;
+    for (unsigned waited = 0; waited < 200; waited++) {
+        bool local_ready = !ghost_router_local_enabled() || ghost_offline_ready();
+        if (ghost_dns_ready() && local_ready) {
+            services_ready = true;
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    if (!services_ready)
+        ESP_LOGW("boot", "Local dongle services did not become ready before AP activation");
+    ESP_ERROR_CHECK(ghost_network_activate());
     if (!ghost_setup)
         ghost_reachability_start();
     if (!ghost_setup)
         ghost_mqtt_start();
     ghost_web_start();
     xTaskCreate(health, "health", 2048, NULL, 2, &ghost_health_task);
-    free(c);
     ESP_LOGI("boot", "SolarProxxie ready. Mode: %s", ghost_setup ? "setup" : "gateway");
 }

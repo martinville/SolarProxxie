@@ -4,6 +4,7 @@
 typedef struct {
     uint32_t ip;
     uint64_t updated;
+    uint64_t field_updated[GHOST_FIELDS_MAX];
     unsigned frames;
     bool conflict;
     ghost_values_t values;

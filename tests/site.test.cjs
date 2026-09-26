@@ -7,11 +7,15 @@ const release=JSON.parse(fs.readFileSync('site/firmware/release.json','utf8'));
 
 assert.equal(document.querySelector('title').textContent,'SolarProxxie - ESP32 gateway and firmware installer');
 assert.equal(document.querySelector('.header-logo').getAttribute('src'),'logo.svg');
-assert.equal(document.querySelectorAll('#nav [data-page]').length,5);
-for(const page of ['overview','operation','install','security','about'])assert(document.querySelector(`[data-page-panel="${page}"]`),page);
+assert.equal(document.querySelectorAll('#nav [data-page]').length,4);
+for(const page of ['overview','install','security','about'])assert(document.querySelector(`[data-page-panel="${page}"]`),page);
 assert.equal(document.querySelectorAll('table').length,0,'Project page uses plain sections and lists instead of tables');
 assert(!/Network path|Decoder profiles|Outputs/.test(document.querySelector('[data-page-panel="overview"]').textContent),'Overview omits the old technical summary cards');
-assert.match(document.querySelector('[data-page-panel="overview"]').textContent,/What SolarProxxie does/);
+assert.match(document.querySelector('[data-page-panel="overview"]').textContent,/See what your inverter is doing, locally/);
+assert.equal(document.querySelector('.status-panel'),null,'Overview has no hardware or firmware status grid');
+assert.equal(document.querySelector('.network-figure img').getAttribute('src'),'network-flow.svg');
+assert(fs.statSync('site/network-flow.svg').size>1000);
+assert.match(document.querySelector('.supported-dongles').textContent,/PV Inteless Wi-Fi dongle/);
 assert.equal(document.querySelector('esp-web-install-button').getAttribute('manifest'),'firmware/manifest.json');
 assert.match(document.querySelector('[data-page-panel="install"]').textContent,/erases existing ESP32 configuration/i);
 assert.match(document.querySelector('[data-page-panel="security"]').textContent,/firmware-upload/i);
