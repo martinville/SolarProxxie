@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 330" role="img" aria-labelledby="title desc">
+  <title id="title">SolarProxxie network flow</title>
+  <desc id="desc">The inverter dongle connects to the SolarProxxie ESP32 access point. The ESP32 forwards traffic through home Wi-Fi toward the Internet, while readings remain available locally.</desc>
+  <rect width="1000" height="330" rx="12" fill="#24251f"/>
+  <path d="M72 44h856" stroke="#46473d"/>
+  <text x="72" y="29" fill="#c4c0b5" font-family="Arial,sans-serif" font-size="12" letter-spacing="2">HOW THE CONNECTION WORKS</text>
+
+  <path d="M202 145h66m211 0h65m185 0h63" stroke="#f1c94f" stroke-width="3" stroke-linecap="round"/>
+  <path d="m261 139 9 6-9 6m276-12 9 6-9 6m238-12 9 6-9 6" fill="none" stroke="#f1c94f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="233" y="128" fill="#c4c0b5" font-family="Arial,sans-serif" font-size="12" text-anchor="middle">Wi-Fi</text>
+  <text x="511" y="109" fill="#c4c0b5" font-family="Arial,sans-serif" font-size="12" text-anchor="middle"><tspan x="511">Home</tspan><tspan x="511" dy="15">Wi-Fi</tspan></text>
+
+  <rect x="72" y="84" width="130" height="122" rx="8" fill="#1b1c18" stroke="#696a59" stroke-width="2"/>
+  <rect x="113" y="105" width="48" height="49" rx="5" fill="none" stroke="#f1c94f" stroke-width="3"/>
+  <path d="M121 163h32m-26 8h20" stroke="#acd3a1" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="137" cy="129" r="7" fill="#f1c94f"/>
+  <text x="137" y="229" fill="#f3f0e7" font-family="Arial,sans-serif" font-size="17" font-weight="bold" text-anchor="middle">Inverter dongle</text>
+
+  <rect x="269" y="75" width="210" height="141" rx="9" fill="#302f25" stroke="#f1c94f" stroke-width="2"/>
+  <rect x="340" y="101" width="68" height="68" rx="6" fill="#f1c94f"/>
+  <rect x="353" y="114" width="42" height="42" rx="4" fill="#24251f"/>
+  <path d="M328 111h-12m12 18h-12m12 18h-12m92-36h12m-12 18h12m-12 18h12" stroke="#f1c94f" stroke-width="5" stroke-linecap="round"/>
+  <text x="374" y="195" fill="#f3f0e7" font-family="Arial,sans-serif" font-size="17" font-weight="bold" text-anchor="middle">SolarProxxie</text>
+  <text x="374" y="235" fill="#c4c0b5" font-family="Arial,sans-serif" font-size="13" text-anchor="middle">ESP32 access point</text>
+
+  <rect x="545" y="91" width="184" height="110" rx="8" fill="#1b1c18" stroke="#696a59" stroke-width="2"/>
+  <path d="M579 154h115m-98-12v-31m80 31v-31" stroke="#acd3a1" stroke-width="4" stroke-linecap="round"/>
+  <path d="M583 124q13-14 26 0m54 0q13-14 26 0" fill="none" stroke="#acd3a1" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="584" cy="172" r="4" fill="#acd3a1"/><circle cx="600" cy="172" r="4" fill="#f1c94f"/>
+  <text x="637" y="229" fill="#f3f0e7" font-family="Arial,sans-serif" font-size="17" font-weight="bold" text-anchor="middle">Home router</text>
+
+  <circle cx="853" cy="145" r="54" fill="#1b1c18" stroke="#696a59" stroke-width="2"/>
+  <ellipse cx="853" cy="145" rx="22" ry="54" fill="none" stroke="#f1c94f" stroke-width="2"/>
+  <path d="M800 145h106m-93-27h80m-80 54h80" fill="none" stroke="#f1c94f" stroke-width="2"/>
+  <text x="853" y="229" fill="#f3f0e7" font-family="Arial,sans-serif" font-size="17" font-weight="bold" text-anchor="middle">Internet</text>
+
+  <path d="M374 217v56h218" fill="none" stroke="#acd3a1" stroke-width="2" stroke-dasharray="5 6" stroke-linecap="round"/>
+  <circle cx="374" cy="273" r="4" fill="#acd3a1"/>
+  <text x="606" y="278" fill="#acd3a1" font-family="Arial,sans-serif" font-size="14">Readings stay available locally</text>
+</svg>

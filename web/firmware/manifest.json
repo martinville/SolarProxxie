@@ -1,0 +1,17 @@
+{
+  "name": "SolarProxxie",
+  "version": "1.2.0",
+  "new_install_prompt_erase": false,
+  "builds": [
+    {
+      "chipFamily": "ESP32",
+      "improv": false,
+      "parts": [
+        {
+          "path": "SolarProxxie-full.bin",
+          "offset": 0
+        }
+      ]
+    }
+  ]
+}
