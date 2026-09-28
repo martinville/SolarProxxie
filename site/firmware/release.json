@@ -6,12 +6,12 @@
   "full_install": {
     "file": "SolarProxxie-full.bin",
     "bytes": 1276176,
-    "sha256": "a5365e2866f36d6900bd57de8d3458033ac9a48cc420390109e9f0ded2abd1e7",
+    "sha256": "96032dc6c3a0351d0d521f3b23fa756a771cd5523044b905cb65f2420a03e9ab",
     "erases_configuration": true
   },
   "ota": {
     "file": "SolarProxxie.bin",
     "bytes": 1145104,
-    "sha256": "a463ea06c1b7c99bdb648d0ef3a29619f2d813133ee20416faa22ac167b75dad"
+    "sha256": "3b73710e45d2ea74cf8ab1b7fe4a13bc0edc932f16a005899b79fff79c8189b5"
   }
 }
